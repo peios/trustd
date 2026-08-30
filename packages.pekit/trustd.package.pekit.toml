@@ -1,0 +1,11 @@
+# trustd — the Peios trust store.
+
+[package]
+description = "Peios trust store - composes CA trust from the shipped roots and the registry"
+
+[files]
+":usr/sbin/trustd" = "usr/sbin/trustd"
+# The service definition and the Trust keys. Inert until an image names the
+# seed in [registry] autoapply.
+":usr/share/regim/trustd-service.reg" = "usr/share/regim/trustd-service.reg"
+":usr/share/regman/trustd.regman" = "usr/share/regman/trustd.regman"

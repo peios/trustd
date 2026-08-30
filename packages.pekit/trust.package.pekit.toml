@@ -1,0 +1,8 @@
+# trust — the trust store's operator command: list, show, status, add,
+# remove, distrust, restore, reload.
+
+[package]
+description = "Operator command for the Peios trust store"
+
+[files]
+":usr/bin/trust" = "usr/bin/trust"

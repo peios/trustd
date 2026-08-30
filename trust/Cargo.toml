@@ -1,0 +1,19 @@
+[package]
+name = "trust"
+description = "Operator command for the Peios trust store."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "trust"
+path = "src/main.rs"
+
+[dependencies]
+libtrust = { path = "../libtrust" }
+# The same certificate handling the daemon uses, so `trust add` rejects what
+# trustd would reject, at the moment a person can still fix it.
+trustd = { path = "../trustd" }
+libc = { workspace = true }
+peios = { workspace = true }
