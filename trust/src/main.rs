@@ -191,14 +191,33 @@ fn remove(name: &str) -> ExitCode {
     }
 }
 
-/// The fingerprint to distrust, from a fingerprint or a certificate file.
+/// The fingerprint to act on, from a whole fingerprint, a prefix of one as
+/// `trust list` prints it, or a certificate file.
+///
+/// A prefix is resolved against the store, so what `list` shows can be
+/// pasted straight back in. An ambiguous prefix is refused rather than
+/// guessed at: distrusting the wrong certificate is not a mistake worth
+/// being convenient about.
 fn target_fingerprint(argument: &str) -> Result<String, String> {
     let normalised = normalise_fingerprint(argument);
-    if normalised.len() == 64 && normalised.bytes().all(|b| b.is_ascii_hexdigit()) {
+    let looks_hex = !normalised.is_empty() && normalised.bytes().all(|b| b.is_ascii_hexdigit());
+    if looks_hex && normalised.len() == 64 {
         return Ok(normalised);
     }
+    if looks_hex && normalised.len() >= 8 {
+        let list = roots(false, None)?;
+        let matches: Vec<&Root> = list.iter().filter(|r| r.fingerprint.starts_with(&normalised)).collect();
+        return match matches.as_slice() {
+            [root] => Ok(root.fingerprint.clone()),
+            [] => Err(format!(
+                "no certificate in the store starts with {normalised} — give the whole fingerprint if you mean one the store does not have"
+            )),
+            many => Err(format!("{normalised} matches {} certificates; be more specific", many.len())),
+        };
+    }
     let der = read_input(argument)?;
-    let parsed = cert::parse(&der, None).map_err(|e| format!("{argument} is neither a SHA-256 fingerprint nor a certificate ({e})"))?;
+    let parsed = cert::parse(&der, None)
+        .map_err(|e| format!("{argument} is neither a SHA-256 fingerprint nor a certificate ({e})"))?;
     Ok(parsed.fingerprint)
 }
 
@@ -399,6 +418,12 @@ fn take_option(args: &mut Vec<String>, flag: &str) -> Option<String> {
 }
 
 fn main() -> ExitCode {
+    // Rust's runtime ignores SIGPIPE, so writing to a closed pipe raises an
+    // error that the print macros turn into a panic — `trust show | head`
+    // ends in a backtrace instead of stopping. Restore the default.
+    // SAFETY: setting a signal disposition before any thread is started.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let purpose = take_option(&mut args, "--purpose");
     let purposes = take_option(&mut args, "--purposes")
