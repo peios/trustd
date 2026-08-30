@@ -21,6 +21,7 @@
 
 use std::fs;
 use std::io;
+use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -98,6 +99,13 @@ pub fn bundle(composed: &Composed) -> String {
     out
 }
 
+/// Add the operation and the path to an error. A renderer does a dozen
+/// filesystem operations and reports one error; without this, "Permission
+/// denied" says nothing about what was denied.
+fn at<'a>(operation: &'a str, path: &'a Path) -> impl FnOnce(io::Error) -> io::Error + 'a {
+    move |e| io::Error::new(e.kind(), format!("{operation} {}: {e}", path.display()))
+}
+
 /// Write the files for `composed` under `root`, or remove them in
 /// [`Compat::None`]. Returns the paths that now exist.
 ///
@@ -110,22 +118,23 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
     if compat == Compat::None {
         // Leaving the files behind would leave stale trust in force, which
         // is worse than the honest breakage of having none.
-        remove_if_present(&cert_pem)?;
-        remove_dir_if_present(&certs)?;
+        remove_if_present(&cert_pem).map_err(at("remove", &cert_pem))?;
+        remove_dir_if_present(&certs).map_err(at("remove", &certs))?;
         return Ok(Vec::new());
     }
 
-    fs::create_dir_all(root)?;
-    set_mode(root, DIR_MODE)?;
+    fs::create_dir_all(root).map_err(at("create", root))?;
+    set_mode(root, DIR_MODE);
 
     // Build the whole directory alongside, then exchange it in one step.
     let staging = root.join("certs.new");
-    remove_dir_if_present(&staging)?;
-    fs::create_dir_all(&staging)?;
-    set_mode(&staging, DIR_MODE)?;
+    remove_dir_if_present(&staging).map_err(at("remove", &staging))?;
+    fs::create_dir_all(&staging).map_err(at("create", &staging))?;
+    set_mode(&staging, DIR_MODE);
 
     let text = bundle(composed);
-    write_file(&staging.join("ca-certificates.crt"), text.as_bytes())?;
+    let bundle_path = staging.join("ca-certificates.crt");
+    write_file(&bundle_path, text.as_bytes()).map_err(at("write", &bundle_path))?;
 
     // OpenSSL's CApath: one PEM per root, named by subject hash, with a
     // sequence number to separate the occasional collision.
@@ -142,14 +151,15 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
                 0
             }
         };
-        write_file(&staging.join(format!("{hash}.{sequence}")), cert::to_pem(&root_entry.parsed.der).as_bytes())?;
+        let hashed = staging.join(format!("{hash}.{sequence}"));
+        write_file(&hashed, cert::to_pem(&root_entry.parsed.der).as_bytes()).map_err(at("write", &hashed))?;
     }
 
-    exchange(&staging, &certs)?;
+    exchange(&staging, &certs).map_err(at("install", &certs))?;
 
     // The default CAfile is a copy rather than a link: it is read through a
     // filesystem merge, and a plain file has no resolution to get wrong.
-    write_file(&cert_pem, text.as_bytes())?;
+    write_file(&cert_pem, text.as_bytes()).map_err(at("write", &cert_pem))?;
 
     Ok(vec![
         certs.join("ca-certificates.crt").display().to_string(),
@@ -162,12 +172,18 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
 fn write_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("tmp");
     fs::write(&temporary, contents)?;
-    set_mode(&temporary, FILE_MODE)?;
+    set_mode(&temporary, FILE_MODE);
     fs::rename(&temporary, path)
 }
 
-fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+/// Best-effort, and deliberately so. On Peios access is decided by the
+/// security descriptor — which trustd stamps separately — not by mode bits,
+/// and `chmod` may not be permitted at all. A render that failed over a
+/// permission bit nothing consults would leave the machine with no trust
+/// store for no reason. The mode still matters when these files are read on
+/// an ordinary Linux host, so it is set where it can be.
+fn set_mode(path: &Path, mode: u32) {
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
 }
 
 fn remove_if_present(path: &Path) -> io::Result<()> {
@@ -214,7 +230,9 @@ fn exchange(staging: &Path, live: &Path) -> io::Result<()> {
         // syscall) still gets a correct store, just with a window in which
         // the directory is the new one before the old is gone. Better than
         // refusing to render.
-        if matches!(error.raw_os_error(), Some(libc::EINVAL) | Some(libc::ENOSYS) | Some(libc::ENOTSUP)) {
+        if matches!(error.raw_os_error(), Some(libc::EINVAL) | Some(libc::ENOSYS) | Some(libc::ENOTSUP))
+            || error.kind() == ErrorKind::PermissionDenied
+        {
             let previous = live.with_extension("previous");
             remove_dir_if_present(&previous)?;
             fs::rename(live, &previous)?;
