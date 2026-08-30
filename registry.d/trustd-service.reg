@@ -1,0 +1,60 @@
+{
+  "_comment": [
+    "The trustd service definition, and the trust store's own keys.",
+    "",
+    "Identity is LocalService. trustd needs no privilege at all: it reads a",
+    "file the ca-certificates package ships, reads the registry, and writes",
+    "/system/retc/ssl. Nothing it holds is secret -- the root set is public,",
+    "which is also why its socket is open to everyone. Private keys are",
+    "deliberately not trustd's: a key holder is a signing oracle under",
+    "compromise and wants the opposite security posture, so machine identity",
+    "belongs to a future key service, not here.",
+    "",
+    "(peinit today materialises every non-SYSTEM identity as a SYSTEM token",
+    "carrying the service SID -- PEI-329. The intent is recorded here so",
+    "that when service logon exists nothing about trustd has to change.)",
+    "",
+    "Readiness is Notify (0): trustd sends READY=1 once it has composed the",
+    "store and rendered it. Anything that speaks TLS should carry",
+    "Requires = [\"trustd\"], because on a live image /system/retc is empty",
+    "every boot and an unrendered store means no trust at all.",
+    "",
+    "RestartPolicy is Always (2). A machine whose trust store is stale is",
+    "one that cannot learn a certificate was revoked.",
+    "",
+    "The Trust keys are created here, empty, so that trustd's watch has a",
+    "target the moment it starts and an operator can find the knobs. The",
+    "roots themselves are NOT here: they are package data, because reg apply",
+    "is additive and Mozilla's removals would otherwise linger for ever.",
+    "",
+    "Shipped by the trustd package into /usr/share/regim/; inert until an",
+    "image names it in [registry] autoapply."
+  ],
+  "keys": [
+    { "path": "Machine\\System" },
+    { "path": "Machine\\System\\Services" },
+    {
+      "path": "Machine\\System\\Services\\trustd",
+      "values": [
+        { "name": "ImagePath", "type": "sz", "data": "/usr/sbin/trustd" },
+        { "name": "Triggers", "type": "multi", "data": ["boot"] },
+        { "name": "Identity", "type": "sz", "data": "LocalService" },
+        { "name": "Readiness", "type": "dword", "data": 0 },
+        { "name": "RuntimeDirectories", "type": "multi", "data": ["trustd"] },
+        { "name": "RestartPolicy", "type": "dword", "data": 2 },
+        { "name": "ErrorControl", "type": "dword", "data": 0 },
+        { "name": "DisplayName", "type": "sz", "data": "Trust store" },
+        { "name": "Description", "type": "sz", "data": "Composes the machine's CA trust from the shipped roots and the registry, and serves it" }
+      ]
+    },
+    {
+      "path": "Machine\\System\\Trust",
+      "values": [
+        { "name": "GenerateLinuxTrustFiles", "type": "dword", "data": 1 }
+      ]
+    },
+    { "path": "Machine\\System\\Trust\\Certificates" },
+    { "path": "Machine\\System\\Trust\\Certificates\\Add" },
+    { "path": "Machine\\System\\Trust\\Certificates\\Distrust" }
+  ]
+}

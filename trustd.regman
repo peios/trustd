@@ -1,0 +1,99 @@
+--- machine\system\trust
+canonical: Machine\System\Trust
+
+What this machine trusts, and nothing else. The certificates themselves
+that Mozilla ships are *not* here — they are package data at
+`/usr/share/ca-certificates/mozilla.crt`, because `reg apply` is additive
+and a root Mozilla withdrew would otherwise linger in the registry for
+ever, while package upgrade already replaces payload correctly. What lives
+here is what somebody decided: an addition, a distrust, a mode. That is
+what keeps a domain audit legible.
+
+trustd composes the shipped roots with this subtree and serves the result
+on `/run/trustd/trust.sock`; the files under `/etc/ssl` are a rendering of
+it, not the thing itself.
+
+Default security: inherits the Machine hive root (SYSTEM and Administrators
+full, Authenticated Users read). That descriptor is the *only* gate on
+changing what this machine trusts — `trust add` and `reg set` take the same
+path, and there is deliberately no second permission model.
+
+--- machine\system\trust generatelinuxtrustfiles
+canonical: Machine\System\Trust GenerateLinuxTrustFiles
+type: REG_DWORD
+default: 1
+applies: live
+
+Whether the compat files exist.
+
+- `0` — no files. The machine's trust store is the socket alone. Software
+  that reads a path finds nothing and fails with certificate errors; that
+  is the honest outcome and the point of the setting. Suited to an
+  appliance image whose whole software set speaks the socket. Switching to
+  0 removes the files, because leaving stale trust in force is worse than
+  having none.
+- `1` — rendered and kept current (the default): `/etc/ssl/certs/ca-certificates.crt`,
+  `/etc/ssl/cert.pem` and the hashed `/etc/ssl/certs/` directory. Required
+  while anything on the machine reads trust from a file, which today is
+  nearly everything.
+- `2` — reserved for serving the files through trustd itself per read.
+  Treated as `1` until it exists.
+
+--- machine\system\trust controlsecurity
+canonical: Machine\System\Trust ControlSecurity
+type: REG_BINARY
+default: Everyone: TRUST_QUERY; SYSTEM, Administrators: all
+applies: live
+
+The trustd control object's descriptor, self-relative. Checked against the
+peer's token on every request to `/run/trustd/trust.sock`. Rights:
+`TRUST_QUERY` (0x1) to read the root set and the status, `TRUST_CONTROL`
+(0x2) to force a recompose. Everyone may query by default because the root
+set is public — in the default mode it is sitting in a world-readable file.
+
+Note what this does not govern: adding or distrusting a certificate. Those
+are registry writes under `Certificates\`, gated by that key's descriptor.
+
+--- machine\system\trust\certificates\add
+canonical: Machine\System\Trust\Certificates\Add
+
+One subkey per certificate this machine trusts beyond the shipped set. The
+subkey name is a label of the operator's choosing; it names the decision,
+not the certificate.
+
+Values on each subkey:
+
+- `Certificate` (REG_BINARY): the certificate, DER. Written **last** when
+  an entry is created — until it exists the entry is incomplete, and trustd
+  skips incomplete entries rather than acting on half of one.
+- `Purposes` (REG_MULTI_SZ, default `ServerAuth`): what the certificate is
+  trusted for. v1 renders `ServerAuth` and carries the rest, so a
+  code-signing or name-constrained root is a value change later rather than
+  a schema change.
+
+trustd validates every entry on read and never trusts the writer: an entry
+that is not a certificate, is not a CA (`basicConstraints`), or has expired
+is skipped with a warning, and the rest of the store is unaffected. One
+operator's typo does not take the machine's trust down.
+
+A package may *offer* an entry as a regim seed, inert until an image or an
+administrator applies it. A package must never add to the system store by
+installing: `peipkg install` widening what the whole machine trusts is the
+supply-chain hole every distribution learned to close.
+
+--- machine\system\trust\certificates\distrust
+canonical: Machine\System\Trust\Certificates\Distrust
+
+One value per certificate this machine must not trust, whatever it came
+from. The value name is the certificate's SHA-256 fingerprint as 64 hex
+digits — never a subject name, which is forgeable and reused. The data is a
+REG_SZ reason, for whoever reads it later.
+
+This is the emergency path, and the reason the shipped roots can be package
+data: a distrust takes effect within seconds of the write, on one machine
+or pushed domain-wide, with no package rebuild and no reboot. It applies to
+shipped roots and to additions alike.
+
+A distrust for a certificate the machine does not have is kept and reported
+rather than discarded — if that root ever arrives, in a bundle upgrade or
+an addition, it is already refused.
