@@ -1,0 +1,31 @@
+#!/bin/sh
+# Give trustd a directory it can own, before trustd starts.
+#
+# trustd runs as LocalService: it needs no privilege, holds no secret, and
+# serves only public data. But it has to write the rendered trust store into
+# /system/retc/ssl, and /system/retc is SYSTEM-owned — Everyone gets read
+# and execute there, which is right, and means a least-privileged service
+# cannot create its own directory.
+#
+# peinit provisions /run/<service> for a service and nothing else, so this
+# runs as ExecStartPre with HookIdentity = SYSTEM: create the directory once
+# and hand it to trustd's own service SID. The daemon itself never runs with
+# privilege it does not need.
+#
+# The SID is trustd's service SID -- S-1-5-80 with five little-endian u32
+# sub-authorities from SHA-1 of the upper-cased UTF-16LE service name, as
+# peinit derives it. Granting the *service* rather than LocalService matters:
+# LocalService is shared, and every other service that runs as it has no
+# business writing the machine's trust store.
+#
+# `f` is FILE_ALL. Read and write alone are not enough: creating a file in a
+# directory is governed by FILE_ADD_FILE and FILE_ADD_SUBDIRECTORY, which
+# the short forms do not include. CI,OI so what trustd creates inherits it.
+set -eu
+
+TRUSTD_SID='S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888'
+STORE=/system/retc/ssl
+
+mkdir -p "$STORE"
+sd allow --flags CI,OI "$STORE" "$TRUSTD_SID:f"
+echo "prepare-store: $STORE is ready for $TRUSTD_SID"
