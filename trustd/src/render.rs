@@ -117,9 +117,13 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
 
     if compat == Compat::None {
         // Leaving the files behind would leave stale trust in force, which
-        // is worse than the honest breakage of having none.
+        // is worse than the honest breakage of having none. The directories
+        // themselves stay: they are the hook's, and an empty CApath is
+        // exactly as trust-free as an absent one.
         remove_if_present(&cert_pem).map_err(at("remove", &cert_pem))?;
-        remove_dir_if_present(&certs).map_err(at("remove", &certs))?;
+        if certs.exists() {
+            empty_dir(&certs).map_err(at("empty", &certs))?;
+        }
         return Ok(Vec::new());
     }
 
@@ -127,10 +131,21 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
     set_mode(root, DIR_MODE);
 
     // Build the whole directory alongside, then exchange it in one step.
+    //
+    // The staging directory is emptied and refilled, never created and
+    // destroyed. On Peios a directory a service creates for itself comes
+    // out with a descriptor that names SYSTEM and Administrators and not
+    // the creator, so a least-privileged daemon can make a directory it
+    // cannot then use. Both directories are made once by the pre-start
+    // hook, and a rename carries a descriptor with it — so exchanging them
+    // for ever keeps the grant that was stamped on each.
     let staging = root.join("certs.new");
-    remove_dir_if_present(&staging).map_err(at("remove", &staging))?;
-    fs::create_dir_all(&staging).map_err(at("create", &staging))?;
-    set_mode(&staging, DIR_MODE);
+    if staging.exists() {
+        empty_dir(&staging).map_err(at("empty", &staging))?;
+    } else {
+        fs::create_dir_all(&staging).map_err(at("create", &staging))?;
+        set_mode(&staging, DIR_MODE);
+    }
 
     let text = bundle(composed);
     let bundle_path = staging.join("ca-certificates.crt");
@@ -194,6 +209,20 @@ fn remove_if_present(path: &Path) -> io::Result<()> {
     }
 }
 
+/// Remove a directory's contents, leaving the directory — and its
+/// descriptor — in place.
+fn empty_dir(path: &Path) -> io::Result<()> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 fn remove_dir_if_present(path: &Path) -> io::Result<()> {
     match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
@@ -225,6 +254,8 @@ fn exchange(staging: &Path, live: &Path) -> io::Result<()> {
         )
     };
     if rc != 0 {
+        // Note: on the failure path below the directories are renamed
+        // rather than recreated, so their descriptors travel with them.
         let error = io::Error::last_os_error();
         // A filesystem without RENAME_EXCHANGE (or a kernel that lacks the
         // syscall) still gets a correct store, just with a window in which
@@ -352,7 +383,14 @@ mod tests {
         let paths = render(&root, &composed, Compat::None).unwrap();
         assert!(paths.is_empty());
         assert!(!root.join("cert.pem").exists());
-        assert!(!root.join("certs").exists(), "stale trust must not survive the switch to mode 0");
+        // The directory stays — it belongs to the pre-start hook, and its
+        // descriptor is not trustd's to recreate — but nothing trusted may
+        // remain inside it.
+        assert_eq!(
+            fs::read_dir(root.join("certs")).map(|d| d.count()).unwrap_or(0),
+            0,
+            "stale trust must not survive the switch to mode 0"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
