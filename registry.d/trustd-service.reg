@@ -14,6 +14,13 @@
     "carrying the service SID -- PEI-329. The intent is recorded here so",
     "that when service logon exists nothing about trustd has to change.)",
     "",
+    "ExecStartPre runs prepare-store as SYSTEM (HookIdentity) to create",
+    "/system/retc/ssl and hand it to trustd's service SID. peinit provisions",
+    "/run/<service> and nothing else, and /system/retc is SYSTEM-owned, so a",
+    "least-privileged service has no way to make itself a directory there.",
+    "The alternative -- running trustd as SYSTEM -- would throw away exactly",
+    "the property that makes a public-data daemon safe. See PEI-329.",
+    "",
     "Readiness is Notify (0): trustd sends READY=1 once it has composed the",
     "store and rendered it. Anything that speaks TLS should carry",
     "Requires = [\"trustd\"], because on a live image /system/retc is empty",
@@ -31,30 +38,96 @@
     "image names it in [registry] autoapply."
   ],
   "keys": [
-    { "path": "Machine\\System" },
-    { "path": "Machine\\System\\Services" },
+    {
+      "path": "Machine\\System"
+    },
+    {
+      "path": "Machine\\System\\Services"
+    },
     {
       "path": "Machine\\System\\Services\\trustd",
       "values": [
-        { "name": "ImagePath", "type": "sz", "data": "/usr/sbin/trustd" },
-        { "name": "Triggers", "type": "multi", "data": ["boot"] },
-        { "name": "Identity", "type": "sz", "data": "LocalService" },
-        { "name": "Readiness", "type": "dword", "data": 0 },
-        { "name": "RuntimeDirectories", "type": "multi", "data": ["trustd"] },
-        { "name": "RestartPolicy", "type": "dword", "data": 2 },
-        { "name": "ErrorControl", "type": "dword", "data": 0 },
-        { "name": "DisplayName", "type": "sz", "data": "Trust store" },
-        { "name": "Description", "type": "sz", "data": "Composes the machine's CA trust from the shipped roots and the registry, and serves it" }
+        {
+          "name": "ImagePath",
+          "type": "sz",
+          "data": "/usr/sbin/trustd"
+        },
+        {
+          "name": "Triggers",
+          "type": "multi",
+          "data": [
+            "boot"
+          ]
+        },
+        {
+          "name": "Identity",
+          "type": "sz",
+          "data": "LocalService"
+        },
+        {
+          "name": "ExecStartPre",
+          "type": "multi",
+          "data": [
+            "/usr/libexec/trustd/prepare-store"
+          ]
+        },
+        {
+          "name": "HookIdentity",
+          "type": "sz",
+          "data": "SYSTEM"
+        },
+        {
+          "name": "Readiness",
+          "type": "dword",
+          "data": 0
+        },
+        {
+          "name": "RuntimeDirectories",
+          "type": "multi",
+          "data": [
+            "trustd"
+          ]
+        },
+        {
+          "name": "RestartPolicy",
+          "type": "dword",
+          "data": 2
+        },
+        {
+          "name": "ErrorControl",
+          "type": "dword",
+          "data": 0
+        },
+        {
+          "name": "DisplayName",
+          "type": "sz",
+          "data": "Trust store"
+        },
+        {
+          "name": "Description",
+          "type": "sz",
+          "data": "Composes the machine's CA trust from the shipped roots and the registry, and serves it"
+        }
       ]
     },
     {
       "path": "Machine\\System\\Trust",
       "values": [
-        { "name": "GenerateLinuxTrustFiles", "type": "dword", "data": 1 }
+        {
+          "name": "GenerateLinuxTrustFiles",
+          "type": "dword",
+          "data": 1
+        }
       ]
     },
-    { "path": "Machine\\System\\Trust\\Certificates" },
-    { "path": "Machine\\System\\Trust\\Certificates\\Add" },
-    { "path": "Machine\\System\\Trust\\Certificates\\Distrust" }
+    {
+      "path": "Machine\\System\\Trust\\Certificates"
+    },
+    {
+      "path": "Machine\\System\\Trust\\Certificates\\Add"
+    },
+    {
+      "path": "Machine\\System\\Trust\\Certificates\\Distrust"
+    }
   ]
 }

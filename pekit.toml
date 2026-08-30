@@ -55,6 +55,11 @@ mkdir -p "$PEKIT_OUT/usr/sbin" "$PEKIT_OUT/usr/bin"
 install -m 0755 "$PEKIT_OUT/target/release/trustd" "$PEKIT_OUT/usr/sbin/trustd"
 install -m 0755 "$PEKIT_OUT/target/release/trust" "$PEKIT_OUT/usr/bin/trust"
 
+# The pre-start hook that gives trustd a directory it can own; see the
+# script and trustd-service.reg for why a least-privileged daemon needs one.
+mkdir -p "$PEKIT_OUT/usr/libexec/trustd"
+install -m 0755 "$SRC/libexec/prepare-store" "$PEKIT_OUT/usr/libexec/trustd/prepare-store"
+
 # Seeds are offered, not applied: an image opts in with [registry] autoapply.
 mkdir -p "$PEKIT_OUT/usr/share/regim" "$PEKIT_OUT/usr/share/regman"
 install -m 0644 "$SRC/registry.d/trustd-service.reg" "$PEKIT_OUT/usr/share/regim/trustd-service.reg"
