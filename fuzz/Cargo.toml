@@ -1,0 +1,36 @@
+[package]
+name = "trustd-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+libtrust = { path = "../libtrust" }
+trustd = { path = "../trustd" }
+
+[[bin]]
+name = "cert_parse"
+path = "fuzz_targets/cert_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trust_wire"
+path = "fuzz_targets/trust_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "compose"
+path = "fuzz_targets/compose.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -403,7 +403,15 @@ fn write_opt_str(w: &mut Writer, key: &str, v: &Option<String>) {
 
 fn read_str_list(r: &mut Reader<'_>) -> Result<Vec<String>, WireError> {
     let n = r.read_array()?;
-    let mut out = Vec::with_capacity(n);
+    // Never allocate on a count the peer chose. An array header can claim
+    // four billion elements in five bytes, and reserving for that is a
+    // remote out-of-memory kill from a message smaller than this comment.
+    // A real element costs at least one byte, so a count past what is left
+    // in the message is a lie.
+    if n > r.remaining() {
+        return Err(WireError::TooLarge(n));
+    }
+    let mut out = Vec::new();
     for _ in 0..n {
         out.push(r.read_str()?.to_owned());
     }
@@ -627,6 +635,20 @@ mod tests {
         let mut w = Writer::new();
         w.write_map(2).write_str("extra").write_uint(3).write_str("query").write_str("status");
         assert_eq!(Request::decode(&w.to_bytes().unwrap()).unwrap(), Request::Status);
+    }
+
+    #[test]
+    fn an_array_count_the_message_cannot_hold_is_refused() {
+        // Built by hand, because the writer will not emit a message whose
+        // declared count does not match what follows — which is exactly the
+        // message an attacker sends. A fixmap of one, the key, then an
+        // array32 header claiming four billion elements in five bytes.
+        // Reserving for that is a remote out-of-memory kill.
+        let mut bytes = vec![0x81];
+        bytes.push(0xa0 | 8);
+        bytes.extend_from_slice(b"rendered");
+        bytes.extend_from_slice(&[0xdd, 0xff, 0xff, 0xff, 0xff]);
+        assert!(matches!(Reply::decode(&bytes), Err(WireError::TooLarge(_))));
     }
 
     #[test]
