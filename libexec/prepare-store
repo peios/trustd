@@ -31,11 +31,20 @@
 # so both keep this grant for the life of the machine.
 set -eu
 
+# Everything this does is recorded where an operator can read it: it runs as
+# SYSTEM before trustd exists, so a failure here is otherwise invisible and
+# shows up only as trustd reporting a degraded store. /system/retc grants
+# Everyone read and execute, so the log is readable without privilege.
+exec > /system/retc/prepare-store.log 2>&1
+set -x
+
 TRUSTD_SID='S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888'
 STORE=/system/retc/ssl
 
 for dir in "$STORE" "$STORE/certs" "$STORE/certs.new"; do
   mkdir -p "$dir"
+  sd show "$dir" || true
   sd allow --flags CI,OI "$dir" "$TRUSTD_SID:f"
+  sd show "$dir" || true
 done
 echo "prepare-store: $STORE is ready for $TRUSTD_SID"
