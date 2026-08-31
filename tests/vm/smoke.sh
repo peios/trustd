@@ -47,7 +47,7 @@
   # A real, valid CA certificate is to hand: one the store already ships.
   # Adding it under our own name exercises the whole path, and the
   # duplicate collapsing is itself the documented behaviour.
-  trust show "$FP" | tail -n +8 > /share/one.pem
+  trust show "$FP" --pem > /share/one.pem
   head -1 /share/one.pem
   trust add smoke-ca /share/one.pem --purposes ServerAuth,CodeSigning; echo "exit=$?"
   sleep 2; trust status | head -7
@@ -69,7 +69,9 @@
   for f in /etc/ssl/certs/ca-certificates.crt /etc/ssl/cert.pem; do
     if [ -e "$f" ]; then echo "STILL PRESENT $f"; else echo "ok   gone: $f"; fi
   done
-  if [ -e /etc/ssl/certs ]; then echo "STILL PRESENT /etc/ssl/certs"; else echo "ok   gone: /etc/ssl/certs"; fi
+  # The directory itself stays — it belongs to the pre-start hook and its
+  # descriptor is not trustd's to recreate — but it must hold nothing.
+  echo "ok   /etc/ssl/certs holds $(ls /etc/ssl/certs | wc -l) entries (want 0)"
   echo "and the socket still serves: $(trust list | tail -1)"
   trust status | tail -4
 
