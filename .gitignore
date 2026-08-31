@@ -1,3 +1,6 @@
 /target
 /out
 /tests/vm/probe-tls/target
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus
