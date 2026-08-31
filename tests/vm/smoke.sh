@@ -35,9 +35,13 @@
   trust show "$FP"; echo "exit=$? (want 2)"
   trust status | head -8
 
-  echo "== restore"
+  echo "== what is distrusted, and why"
+  trust list --distrusted
+
+  echo "== restore, by the same prefix trust list prints"
   trust restore "$FP"; echo "exit=$?"; sleep 2; trust list | tail -1
   echo "hashed entries: $(ls /etc/ssl/certs | wc -l)  (want the original)"
+  trust list --distrusted | tail -1
 
   echo "== add a certificate"
   # A real, valid CA certificate is to hand: one the store already ships.

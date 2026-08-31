@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! trust list [--purpose P]        every root in force
+//! trust list --distrusted        what this machine refuses, and why
 //! trust show <fingerprint>        one root, with its certificate
 //! trust status                    generation, counts, render state
 //! trust add <name> <file|->       trust a certificate
@@ -236,6 +237,12 @@ fn distrust(argument: &str, reason: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Look before writing: afterwards trustd has already dropped the
+    // certificate, so asking then would always answer "no match" and say
+    // the opposite of the truth.
+    let was = roots(false, None)
+        .ok()
+        .and_then(|list| list.into_iter().find(|r| r.fingerprint == fingerprint).map(|r| r.subject));
     let mut data = reason.as_bytes().to_vec();
     data.push(0);
     if let Err(e) = key.set_value(fingerprint.as_bytes(), ValueType::SZ, &data).call() {
@@ -243,25 +250,60 @@ fn distrust(argument: &str, reason: &str) -> ExitCode {
         return ExitCode::FAILURE;
     }
     println!("distrusted {fingerprint}");
-    // Say plainly whether it was in force, because distrusting a certificate
-    // the machine never had is legitimate (it stays in force in case one
-    // arrives) and looks identical otherwise.
-    match roots(false, None) {
-        Ok(list) => match list.iter().find(|r| r.fingerprint == fingerprint) {
-            Some(root) => println!("  was: {}", root.subject),
-            None => println!("  no certificate in the store matched; the entry stays in force in case one arrives"),
-        },
-        Err(_) => {}
+    // Distrusting a certificate the machine does not have is legitimate —
+    // the entry waits in case one arrives — and looks identical otherwise,
+    // so say which happened.
+    match was {
+        Some(subject) => println!("  was: {subject}"),
+        None => println!("  no certificate in the store matched; the entry stays in force in case one arrives"),
     }
     ExitCode::SUCCESS
 }
 
+/// Every fingerprint under `Distrust\`, with its reason.
+///
+/// Read from the registry rather than the socket: a distrusted certificate
+/// is by definition not in the store, so the daemon cannot answer for it.
+fn distrust_entries() -> Result<Vec<(String, String)>, String> {
+    let key = certificates(DISTRUST_KEY)?;
+    let mut out = Vec::new();
+    for value in key.values(None) {
+        let Ok(value) = value else { continue };
+        let Ok(name) = String::from_utf8(value.name.clone()) else { continue };
+        let end = value.data.iter().position(|&b| b == 0).unwrap_or(value.data.len());
+        let reason = String::from_utf8_lossy(&value.data[..end]).into_owned();
+        out.push((normalise_fingerprint(&name), reason));
+    }
+    out.sort();
+    Ok(out)
+}
+
 fn restore(argument: &str) -> ExitCode {
-    let fingerprint = match target_fingerprint(argument) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
+    let normalised = normalise_fingerprint(argument);
+    let fingerprint = if normalised.len() == 64 {
+        normalised
+    } else {
+        // Resolve against what is distrusted, not against the store.
+        match distrust_entries() {
+            Ok(entries) => {
+                let matches: Vec<&(String, String)> =
+                    entries.iter().filter(|(f, _)| f.starts_with(&normalised)).collect();
+                match matches.as_slice() {
+                    [(f, _)] => f.clone(),
+                    [] => {
+                        eprintln!("trust: nothing distrusted starts with {normalised}");
+                        return ExitCode::from(2);
+                    }
+                    many => {
+                        eprintln!("trust: {normalised} matches {} distrust entries; be more specific", many.len());
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("trust: {e}");
+                return ExitCode::FAILURE;
+            }
         }
     };
     let key = match certificates(DISTRUST_KEY) {
@@ -285,6 +327,26 @@ fn restore(argument: &str) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn list_distrusted() -> ExitCode {
+    let entries = match distrust_entries() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("trust: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    for (fingerprint, reason) in &entries {
+        if reason.is_empty() {
+            println!("{}  {fingerprint}", &fingerprint[..16.min(fingerprint.len())]);
+        } else {
+            println!("{}  {reason}", &fingerprint[..16.min(fingerprint.len())]);
+        }
+    }
+    println!();
+    println!("{} distrusted", entries.len());
+    ExitCode::SUCCESS
 }
 
 fn list(purpose: Option<String>) -> ExitCode {
@@ -435,6 +497,7 @@ fn main() -> ExitCode {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
         ["list"] => list(purpose),
+        ["list", "--distrusted"] | ["distrusted"] => list_distrusted(),
         ["show", prefix] => show(prefix),
         ["status"] => status(),
         ["add", name, path] => add(name, path, &purposes),
