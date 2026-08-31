@@ -18,33 +18,46 @@
 # LocalService is shared, and every other service that runs as it has no
 # business writing the machine's trust store.
 #
-# `f` is FILE_ALL. Read and write alone are not enough: creating a file in a
-# directory is governed by FILE_ADD_FILE and FILE_ADD_SUBDIRECTORY, which
-# the short forms do not include.
+# Two things make this less obvious than it looks.
 #
-# Every directory trustd uses is created *here*, and stamped individually.
-# An inheritable ACE on the parent is not enough: a directory trustd creates
-# for itself comes out with a default descriptor naming SYSTEM and
-# Administrators and nothing else, which locks out its own creator. So the
-# two directories the renderer swaps between are made once, by SYSTEM, and
-# thereafter only ever exchanged -- a rename carries the descriptor with it,
-# so both keep this grant for the life of the machine.
+# A directory created under /system/retc comes out with **no DACL at all** —
+# implicit full access — because nothing on /system/retc is inheritable.
+# Adding a single ACE to that is not "granting trustd": it is creating a
+# DACL that grants trustd *and nobody else*, which locks out even an
+# administrator. So the descriptor is written whole, naming everyone who
+# should reach the trust store, not appended to.
+#
+# It is written once, on the top directory, with CI,OI. Inheritance carries
+# it to the two directories below and to every file the renderer writes, so
+# the rendered store comes out readable by Everyone — which is the entire
+# point of rendering it — without trustd having to stamp anything itself.
+#
+# `f` is FILE_ALL. Read and write alone are not enough for the daemon:
+# creating a file in a directory is governed by FILE_ADD_FILE and
+# FILE_ADD_SUBDIRECTORY, which the short forms do not include.
+#
+# --replace makes it idempotent: on an installed machine these directories
+# survive a reboot, and the hook runs again every start.
 set -eu
 
-# Everything this does is recorded where an operator can read it: it runs as
-# SYSTEM before trustd exists, so a failure here is otherwise invisible and
-# shows up only as trustd reporting a degraded store. /system/retc grants
-# Everyone read and execute, so the log is readable without privilege.
 exec > /system/retc/prepare-store.log 2>&1
 set -x
 
 TRUSTD_SID='S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888'
 STORE=/system/retc/ssl
 
-for dir in "$STORE" "$STORE/certs" "$STORE/certs.new"; do
-  mkdir -p "$dir"
-  sd show "$dir" || true
-  sd allow --flags CI,OI "$dir" "$TRUSTD_SID:f"
-  sd show "$dir" || true
-done
+mkdir -p "$STORE"
+sd allow --replace --flags CI,OI "$STORE" \
+  "S-1-5-18:f" \
+  "S-1-5-32-544:f" \
+  "S-1-1-0:rx" \
+  "$TRUSTD_SID:f"
+sd show "$STORE"
+
+# Created after the stamp, so both inherit it. The renderer only ever
+# empties and exchanges these two; it never creates a directory, and a
+# rename carries a descriptor with it.
+mkdir -p "$STORE/certs" "$STORE/certs.new"
+sd show "$STORE/certs"
+
 echo "prepare-store: $STORE is ready for $TRUSTD_SID"

@@ -82,26 +82,6 @@ pub fn protect(path: &Path) {
     }
 }
 
-/// A rendered file must be readable by everything that resolves trust, and
-/// writable by nothing but trustd.
-pub fn protect_rendered(path: &Path) {
-    use peios::file::SecInfo;
-    let system = Sid::well_known(WellKnown::System);
-    let everyone = Sid::well_known(WellKnown::Everyone);
-    let descriptor = AclBuilder::new()
-        .allow(system.as_ref(), AccessMask::GENERIC_ALL.bits(), AceFlags::empty())
-        .allow(
-            everyone.as_ref(),
-            AccessMask::GENERIC_READ.bits() | AccessMask::GENERIC_EXECUTE.bits(),
-            AceFlags::empty(),
-        )
-        .build()
-        .and_then(|dacl| SdBuilder::new().owner(system.as_ref()).group(system.as_ref()).dacl(&dacl).build());
-    if let Ok(sd) = descriptor {
-        let _ = peios::file::set_sd(None, path, SecInfo::OWNER | SecInfo::GROUP | SecInfo::DACL, &sd, 0);
-    }
-}
-
 pub struct ControlObject {
     sd: SecurityDescriptor,
 }

@@ -159,9 +159,13 @@ impl Trustd {
     fn render(&mut self) {
         match render::render(Path::new(STORE_DIR), &self.composed, self.config.compat) {
             Ok(paths) => {
-                for path in &paths {
-                    control::protect_rendered(Path::new(path));
-                }
+                // No descriptor is stamped here on purpose. The store
+                // directory carries an inheritable one — SYSTEM and
+                // Administrators full, Everyone read, trustd full — so
+                // every file the renderer writes comes out readable by the
+                // software that needs it and writable by the next render.
+                // Stamping our own would drop trustd's access to the file
+                // it had just written.
                 if paths.is_empty() {
                     log::info(format_args!("GenerateLinuxTrustFiles is 0; no files are rendered"));
                 } else {
