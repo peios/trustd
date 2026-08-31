@@ -3,7 +3,7 @@
 //! ```text
 //! trust list [--purpose P]        every root in force
 //! trust list --distrusted        what this machine refuses, and why
-//! trust show <fingerprint>        one root, with its certificate
+//! trust show <fingerprint> [--pem] one root; --pem prints the certificate alone
 //! trust status                    generation, counts, render state
 //! trust add <name> <file|->       trust a certificate
 //! trust remove <name>             undo an add
@@ -369,7 +369,7 @@ fn list(purpose: Option<String>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn show(prefix: &str) -> ExitCode {
+fn show(prefix: &str, pem_only: bool) -> ExitCode {
     let wanted = normalise_fingerprint(prefix);
     let list = match roots(true, None) {
         Ok(list) => list,
@@ -383,6 +383,10 @@ fn show(prefix: &str) -> ExitCode {
         [] => {
             eprintln!("trust: no root in the store matches {prefix}");
             ExitCode::from(2)
+        }
+        [root] if pem_only => {
+            print!("{}", cert::to_pem(&root.der));
+            ExitCode::SUCCESS
         }
         [root] => {
             println!("subject      {}", root.subject);
@@ -491,6 +495,8 @@ fn main() -> ExitCode {
     let purposes = take_option(&mut args, "--purposes")
         .map(|v| v.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect::<Vec<_>>())
         .unwrap_or_default();
+    let pem_only = args.iter().any(|a| a == "--pem");
+    args.retain(|a| a != "--pem");
     let reason = take_option(&mut args, "--reason")
         .or_else(|| take_option(&mut args, "-r"))
         .unwrap_or_default();
@@ -498,7 +504,7 @@ fn main() -> ExitCode {
     match args.as_slice() {
         ["list"] => list(purpose),
         ["list", "--distrusted"] | ["distrusted"] => list_distrusted(),
-        ["show", prefix] => show(prefix),
+        ["show", prefix] => show(prefix, pem_only),
         ["status"] => status(),
         ["add", name, path] => add(name, path, &purposes),
         ["remove", name] => remove(name),

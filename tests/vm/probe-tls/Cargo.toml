@@ -1,0 +1,14 @@
+[package]
+name = "probe-tls"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# rustls with the ring provider: a static musl build for the guest, and the
+# same library the Peios daemons use, so this proves the house TLS stack
+# against the house trust store.
+[dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+
+[workspace]
