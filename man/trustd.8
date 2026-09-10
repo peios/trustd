@@ -1,0 +1,47 @@
+.TH TRUSTD 8 "September 2026" "Peios" "System Administration"
+.SH NAME
+trustd \- compose and serve the Peios machine trust store
+.SH SYNOPSIS
+.B trustd
+.SH DESCRIPTION
+.B trustd
+combines the packaged CA bundle with additions and distrust decisions under
+.BR Machine\eSystem\eTrust .
+It serves the effective set on a local socket and, when enabled, renders the
+Linux-compatible certificate bundle and hashed certificate directory.
+.PP
+The daemon watches the registry and periodically checks the packaged bundle.
+Each change recomposes the complete store. Invalid local certificates are
+skipped without discarding the remaining valid trust set. If the packaged
+bundle becomes unreadable, the last rendered store is retained and the daemon
+reports degraded health.
+.PP
+The service runs as LocalService with its own service SID. A SYSTEM pre-start
+hook creates
+.I /system/retc/ssl
+and grants that service SID access; the daemon itself does not need elevated
+privilege and holds no private key.
+.SH CONFIGURATION
+The registry schema and live settings are documented by
+.IR /usr/share/regman/trustd.regman .
+In particular,
+.B GenerateLinuxTrustFiles
+controls whether compatibility files are rendered, while
+.B ControlSecurity
+sets the control socket's security descriptor.
+.SH FILES
+.TP
+.I /usr/share/ca-certificates/mozilla.crt
+Packaged CA root bundle.
+.TP
+.I /run/trustd/trust.sock
+Native query and control socket.
+.TP
+.I /system/retc/ssl
+Rendered compatibility store.
+.TP
+.I /system/retc/prepare-store.log
+Output from the privileged directory preparation hook.
+.SH SEE ALSO
+.BR trust (1),
+.BR reg (1)

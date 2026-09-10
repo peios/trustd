@@ -19,9 +19,14 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use libtrust::{MAX_MESSAGE_BYTES, ROOTS_PER_CHUNK, Reply, Request, Root, SOCKET_PATH, TRUSTD_RUN_DIR, TRUST_ALL_ACCESS, TRUST_CONTROL, TRUST_QUERY};
+use libtrust::{
+    MAX_MESSAGE_BYTES, ROOTS_PER_CHUNK, Reply, Request, Root, SOCKET_PATH, TRUST_ALL_ACCESS,
+    TRUST_CONTROL, TRUST_QUERY, TRUSTD_RUN_DIR,
+};
 use peios::access::AccessCheck;
-use peios::security::{AccessMask, AceFlags, AclBuilder, GenericMapping, SdBuilder, SecurityDescriptor, Sid, WellKnown};
+use peios::security::{
+    AccessMask, AceFlags, AclBuilder, GenericMapping, SdBuilder, SecurityDescriptor, Sid, WellKnown,
+};
 use peios::token::Token;
 
 use crate::log;
@@ -78,10 +83,16 @@ pub fn protect(path: &Path) {
     let system = Sid::well_known(WellKnown::System);
     let everyone = Sid::well_known(WellKnown::Everyone);
     let descriptor = AclBuilder::new()
-        .allow(system.as_ref(), AccessMask::GENERIC_ALL.bits(), AceFlags::empty())
+        .allow(
+            system.as_ref(),
+            AccessMask::GENERIC_ALL.bits(),
+            AceFlags::empty(),
+        )
         .allow(
             everyone.as_ref(),
-            AccessMask::GENERIC_READ.bits() | AccessMask::GENERIC_WRITE.bits() | AccessMask::GENERIC_EXECUTE.bits(),
+            AccessMask::GENERIC_READ.bits()
+                | AccessMask::GENERIC_WRITE.bits()
+                | AccessMask::GENERIC_EXECUTE.bits(),
             AceFlags::empty(),
         )
         .build()
@@ -109,10 +120,14 @@ impl ControlObject {
         if let Some(bytes) = configured {
             match SecurityDescriptor::from_validated_bytes(bytes.to_vec()) {
                 Ok(sd) => return ControlObject { sd },
-                Err(e) => log::warn(format_args!("ControlSecurity is not a valid descriptor ({e}); using the default")),
+                Err(e) => log::warn(format_args!(
+                    "ControlSecurity is not a valid descriptor ({e}); using the default"
+                )),
             }
         }
-        ControlObject { sd: Self::default_sd() }
+        ControlObject {
+            sd: Self::default_sd(),
+        }
     }
 
     fn default_sd() -> SecurityDescriptor {
@@ -122,15 +137,30 @@ impl ControlObject {
         AclBuilder::new()
             .allow(system.as_ref(), TRUST_ALL_ACCESS, AceFlags::empty())
             .allow(administrators.as_ref(), TRUST_ALL_ACCESS, AceFlags::empty())
-            .allow(everyone.as_ref(), TRUST_QUERY | AccessMask::READ_CONTROL.bits(), AceFlags::empty())
+            .allow(
+                everyone.as_ref(),
+                TRUST_QUERY | AccessMask::READ_CONTROL.bits(),
+                AceFlags::empty(),
+            )
             .build()
-            .and_then(|dacl| SdBuilder::new().owner(system.as_ref()).group(system.as_ref()).dacl(&dacl).build())
+            .and_then(|dacl| {
+                SdBuilder::new()
+                    .owner(system.as_ref())
+                    .group(system.as_ref())
+                    .dacl(&dacl)
+                    .build()
+            })
             .expect("the compiled default descriptor builds")
     }
 
     fn mapping() -> GenericMapping {
         let rc = AccessMask::READ_CONTROL.bits();
-        GenericMapping::new(TRUST_QUERY | rc, TRUST_CONTROL | rc, TRUST_QUERY, TRUST_ALL_ACCESS)
+        GenericMapping::new(
+            TRUST_QUERY | rc,
+            TRUST_CONTROL | rc,
+            TRUST_QUERY,
+            TRUST_ALL_ACCESS,
+        )
     }
 
     pub fn permits(&self, stream: &UnixStream, right: u32) -> bool {
@@ -141,11 +171,15 @@ impl ControlObject {
                 return false;
             }
         };
-        AccessCheck::new(&self.sd, AccessMask::from_bits_retain(right), Self::mapping())
-            .token(token.as_fd())
-            .check()
-            .map(|d| d.allowed)
-            .unwrap_or(false)
+        AccessCheck::new(
+            &self.sd,
+            AccessMask::from_bits_retain(right),
+            Self::mapping(),
+        )
+        .token(token.as_fd())
+        .check()
+        .map(|d| d.allowed)
+        .unwrap_or(false)
     }
 }
 
@@ -165,7 +199,11 @@ pub enum Progress {
 impl Client {
     pub fn new(stream: UnixStream, now: Instant) -> Option<Client> {
         stream.set_nonblocking(true).ok()?;
-        Some(Client { stream, buf: Vec::with_capacity(256), since: now })
+        Some(Client {
+            stream,
+            buf: Vec::with_capacity(256),
+            since: now,
+        })
     }
 
     pub fn read(&mut self) -> Progress {
@@ -230,7 +268,14 @@ fn write_message(stream: &mut UnixStream, payload: &[u8]) -> bool {
 /// went away, which is how a subscriber is dropped.
 pub fn send_roots(stream: &mut UnixStream, generation: u64, roots: &[Root]) -> bool {
     if roots.is_empty() {
-        return respond(stream, &Reply::Roots { generation, roots: Vec::new(), more: false });
+        return respond(
+            stream,
+            &Reply::Roots {
+                generation,
+                roots: Vec::new(),
+                more: false,
+            },
+        );
     }
     let chunks: Vec<&[Root]> = roots.chunks(ROOTS_PER_CHUNK).collect();
     for (i, chunk) in chunks.iter().enumerate() {

@@ -70,7 +70,12 @@ pub fn parse(der: &[u8], now: Option<i64>) -> Result<Parsed, Error> {
     if !is_ca(&certificate) {
         return Err(Error::NotACa);
     }
-    let not_after = certificate.tbs_certificate.validity.not_after.to_unix_duration().as_secs() as i64;
+    let not_after = certificate
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_unix_duration()
+        .as_secs() as i64;
     if let Some(now) = now {
         if not_after <= now {
             return Err(Error::Expired);
@@ -171,12 +176,24 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn base64_encode(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         out.push(B64[(n >> 18) as usize & 63] as char);
         out.push(B64[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            B64[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -291,7 +308,10 @@ fn canonical_ava(ava: &[u8]) -> Result<Vec<u8>, der::Error> {
 /// OpenSSL's `asn1_string_canon` byte folding.
 fn fold(value: &[u8]) -> Vec<u8> {
     let start = value.iter().position(|b| *b != b' ').unwrap_or(value.len());
-    let end = value.iter().rposition(|b| *b != b' ').map_or(start, |i| i + 1);
+    let end = value
+        .iter()
+        .rposition(|b| *b != b' ')
+        .map_or(start, |i| i + 1);
     let trimmed = &value[start..end];
     let mut out = Vec::with_capacity(trimmed.len());
     let mut in_space = false;
@@ -306,7 +326,11 @@ fn fold(value: &[u8]) -> Vec<u8> {
         in_space = false;
         // Only ASCII is case-folded; anything else is opaque bytes, exactly
         // as OpenSSL treats it.
-        out.push(if byte.is_ascii() { byte.to_ascii_lowercase() } else { byte });
+        out.push(if byte.is_ascii() {
+            byte.to_ascii_lowercase()
+        } else {
+            byte
+        });
     }
     out
 }
@@ -321,7 +345,10 @@ fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
         out.push(len as u8);
     } else {
         let bytes = len.to_be_bytes();
-        let first = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len() - 1);
+        let first = bytes
+            .iter()
+            .position(|b| *b != 0)
+            .unwrap_or(bytes.len() - 1);
         out.push(0x80 | (bytes.len() - first) as u8);
         out.extend_from_slice(&bytes[first..]);
     }
@@ -342,7 +369,12 @@ fn read_tlv(input: &[u8]) -> Result<(u8, &[u8], &[u8]), der::Error> {
             return Err(bad());
         }
         let bytes = input.get(2..2 + count).ok_or_else(bad)?;
-        (bytes.iter().fold(0usize, |acc, b| (acc << 8) | usize::from(*b)), 2 + count)
+        (
+            bytes
+                .iter()
+                .fold(0usize, |acc, b| (acc << 8) | usize::from(*b)),
+            2 + count,
+        )
     };
     let content = input.get(header..header + len).ok_or_else(bad)?;
     Ok((tag, content, &input[header + len..]))
@@ -392,8 +424,14 @@ mod tests {
     /// (rather than passing bytes through) diverges from OpenSSL.
     const FIXTURES: &[(&str, &str)] = &[
         (include_str!("../tests/fixtures/comodo-ecc.pem"), "eed8c118"),
-        (include_str!("../tests/fixtures/netlock-arany.pem"), "988a38cb"),
-        (include_str!("../tests/fixtures/microsec-2009.pem"), "8160b96c"),
+        (
+            include_str!("../tests/fixtures/netlock-arany.pem"),
+            "988a38cb",
+        ),
+        (
+            include_str!("../tests/fixtures/microsec-2009.pem"),
+            "8160b96c",
+        ),
     ];
 
     #[test]
@@ -411,7 +449,12 @@ mod tests {
         for (pem, _) in FIXTURES {
             let parsed = parse(&from_pem(pem)[0], None).unwrap();
             assert_eq!(parsed.fingerprint.len(), 64);
-            assert!(parsed.fingerprint.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+            assert!(
+                parsed
+                    .fingerprint
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            );
             assert!(parsed.not_after > 1_600_000_000, "{}", parsed.not_after);
             assert!(!parsed.subject.is_empty());
         }
@@ -424,7 +467,11 @@ mod tests {
         assert_eq!(from_pem(&pem), der);
         // A concatenation with commentary between the blocks, as the shipped
         // bundle has.
-        let bundle = format!("# a header\n{}\n# and a note\n{}\n", to_pem(&der[0]), to_pem(&from_pem(FIXTURES[1].0)[0]));
+        let bundle = format!(
+            "# a header\n{}\n# and a note\n{}\n",
+            to_pem(&der[0]),
+            to_pem(&from_pem(FIXTURES[1].0)[0])
+        );
         assert_eq!(from_pem(&bundle).len(), 2);
         assert!(from_pem("no certificates here").is_empty());
     }
@@ -432,7 +479,10 @@ mod tests {
     #[test]
     fn rubbish_is_refused_rather_than_believed() {
         assert!(matches!(parse(b"", None), Err(Error::Malformed(_))));
-        assert!(matches!(parse(&[0x30, 0x82, 0xff, 0xff], None), Err(Error::Malformed(_))));
+        assert!(matches!(
+            parse(&[0x30, 0x82, 0xff, 0xff], None),
+            Err(Error::Malformed(_))
+        ));
         let real = from_pem(FIXTURES[0].0).remove(0);
         // Truncation.
         for cut in [1, 10, real.len() / 2, real.len() - 1] {
@@ -460,6 +510,9 @@ mod tests {
         assert_eq!(fold(b"   "), b"".to_vec());
         assert_eq!(fold(b""), b"".to_vec());
         // Non-ASCII bytes pass through untouched, case and all.
-        assert_eq!(fold(&[0xC3, 0x9A, b' ', b' ', b'X']), vec![0xC3, 0x9A, b' ', b'x']);
+        assert_eq!(
+            fold(&[0xC3, 0x9A, b' ', b' ', b'X']),
+            vec![0xC3, 0x9A, b' ', b'x']
+        );
     }
 }

@@ -79,8 +79,16 @@ fn header(composed: &Composed) -> String {
          #\n\
          # {} root(s): {} shipped, {} added.\n\n",
         composed.roots.len(),
-        composed.roots.iter().filter(|r| r.source == libtrust::Source::Shipped).count(),
-        composed.roots.iter().filter(|r| r.source == libtrust::Source::Added).count(),
+        composed
+            .roots
+            .iter()
+            .filter(|r| r.source == libtrust::Source::Shipped)
+            .count(),
+        composed
+            .roots
+            .iter()
+            .filter(|r| r.source == libtrust::Source::Added)
+            .count(),
     )
 }
 
@@ -167,7 +175,8 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
             }
         };
         let hashed = staging.join(format!("{hash}.{sequence}"));
-        write_file(&hashed, cert::to_pem(&root_entry.parsed.der).as_bytes()).map_err(at("write", &hashed))?;
+        write_file(&hashed, cert::to_pem(&root_entry.parsed.der).as_bytes())
+            .map_err(at("write", &hashed))?;
     }
 
     exchange(&staging, &certs).map_err(at("install", &certs))?;
@@ -261,8 +270,10 @@ fn exchange(staging: &Path, live: &Path) -> io::Result<()> {
         // syscall) still gets a correct store, just with a window in which
         // the directory is the new one before the old is gone. Better than
         // refusing to render.
-        if matches!(error.raw_os_error(), Some(libc::EINVAL) | Some(libc::ENOSYS) | Some(libc::ENOTSUP))
-            || error.kind() == ErrorKind::PermissionDenied
+        if matches!(
+            error.raw_os_error(),
+            Some(libc::EINVAL) | Some(libc::ENOSYS) | Some(libc::ENOTSUP)
+        ) || error.kind() == ErrorKind::PermissionDenied
         {
             let previous = live.with_extension("previous");
             remove_dir_if_present(&previous)?;
@@ -283,7 +294,10 @@ fn cstring(path: &Path) -> io::Result<std::ffi::CString> {
 /// The store directory's files, for a status reply.
 pub fn rendered_paths(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
-    for path in [root.join("certs").join("ca-certificates.crt"), root.join("cert.pem")] {
+    for path in [
+        root.join("certs").join("ca-certificates.crt"),
+        root.join("cert.pem"),
+    ] {
         if path.exists() {
             out.push(path.display().to_string());
         }
@@ -295,7 +309,12 @@ pub fn rendered_paths(root: &Path) -> Vec<String> {
 /// without watching for filesystem events: its length and modification time.
 pub fn stamp(path: &Path) -> Option<(u64, i64)> {
     let meta = fs::metadata(path).ok()?;
-    let modified = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
+    let modified = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64;
     Some((meta.len(), modified))
 }
 
@@ -320,7 +339,8 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("trustd-render-{name}-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("trustd-render-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         path
     }
@@ -340,7 +360,9 @@ mod tests {
         assert_eq!(fs::read_to_string(root.join("cert.pem")).unwrap(), text);
         // One hashed file per root, named as OpenSSL looks them up.
         for entry in &composed.roots {
-            let path = root.join("certs").join(format!("{}.0", entry.parsed.subject_hash));
+            let path = root
+                .join("certs")
+                .join(format!("{}.0", entry.parsed.subject_hash));
             assert!(path.exists(), "missing {}", path.display());
             assert_eq!(cert::from_pem(&fs::read_to_string(&path).unwrap()).len(), 1);
         }
@@ -355,15 +377,26 @@ mod tests {
         let root = scratch("distrust");
         let composed = store::compose(&shipped(), &[], &[], None).unwrap();
         render(&root, &composed, Compat::Files).unwrap();
-        let victim = composed.roots.iter().find(|r| r.parsed.subject.contains("COMODO")).unwrap().clone();
-        let hashed = root.join("certs").join(format!("{}.0", victim.parsed.subject_hash));
+        let victim = composed
+            .roots
+            .iter()
+            .find(|r| r.parsed.subject.contains("COMODO"))
+            .unwrap()
+            .clone();
+        let hashed = root
+            .join("certs")
+            .join(format!("{}.0", victim.parsed.subject_hash));
         assert!(hashed.exists());
 
         // Now distrust it and render again: the CApath entry must be gone,
         // or OpenSSL would keep trusting it through the directory.
-        let after = store::compose(&shipped(), &[], &[victim.parsed.fingerprint.clone()], None).unwrap();
+        let after =
+            store::compose(&shipped(), &[], &[victim.parsed.fingerprint.clone()], None).unwrap();
         render(&root, &after, Compat::Files).unwrap();
-        assert!(!hashed.exists(), "a stale hashed file kept a distrusted root alive");
+        assert!(
+            !hashed.exists(),
+            "a stale hashed file kept a distrusted root alive"
+        );
         let text = fs::read_to_string(root.join("certs/ca-certificates.crt")).unwrap();
         assert!(!text.contains(&victim.parsed.fingerprint));
         assert_eq!(text.matches("BEGIN CERTIFICATE").count(), 2);
@@ -387,7 +420,9 @@ mod tests {
         // descriptor is not trustd's to recreate — but nothing trusted may
         // remain inside it.
         assert_eq!(
-            fs::read_dir(root.join("certs")).map(|d| d.count()).unwrap_or(0),
+            fs::read_dir(root.join("certs"))
+                .map(|d| d.count())
+                .unwrap_or(0),
             0,
             "stale trust must not survive the switch to mode 0"
         );

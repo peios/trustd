@@ -1,0 +1,95 @@
+.TH TRUST 1 "September 2026" "Peios" "User Commands"
+.SH NAME
+trust \- inspect and administer the Peios machine trust store
+.SH SYNOPSIS
+.B trust list
+.RI [ --purpose " purpose" ]
+.br
+.B trust list --distrusted
+.br
+.B trust show
+.I fingerprint
+.RI [ --pem ]
+.br
+.B trust status
+.br
+.B trust add
+.I name file
+.RI [ --purposes " purpose,..." ]
+.br
+.B trust remove
+.I name
+.br
+.B trust distrust
+.I fingerprint-or-file
+.RI [ --reason " text" ]
+.br
+.B trust restore
+.I fingerprint
+.br
+.B trust reload
+.SH DESCRIPTION
+.B trust
+queries the effective certificate set from
+.BR trustd (8).
+Administrative changes are written to
+.BR Machine\eSystem\eTrust
+in the registry, so that key's security descriptor is the authority for who
+may change machine trust.
+.PP
+Fingerprints are SHA-256. Commands that act on a certificate already known to
+the store accept an unambiguous prefix of at least eight hexadecimal digits.
+.SH COMMANDS
+.TP
+.B list
+List effective roots. With
+.BR --purpose ,
+show only roots usable for that purpose. With
+.BR --distrusted ,
+list fingerprints refused by local policy and their recorded reasons.
+.TP
+.B show
+Show one effective root. The
+.B --pem
+option prints only its PEM certificate.
+.TP
+.B status
+Show the daemon generation, health, source counts, compatibility mode, and
+rendered paths.
+.TP
+.B add
+Add one CA certificate from a PEM or DER file, or from standard input when
+.I file
+is
+.BR - .
+The optional comma-separated purpose list defaults to ServerAuth in the daemon.
+.TP
+.B remove
+Remove a locally added certificate by its registry entry name.
+.TP
+.B distrust
+Refuse a certificate regardless of whether it is shipped or locally added.
+The target may be a fingerprint, an unambiguous fingerprint prefix, or a
+certificate file.
+.TP
+.B restore
+Remove a distrust decision.
+.TP
+.B reload
+Ask the daemon to recompose the effective store immediately.
+.SH FILES
+.TP
+.I /run/trustd/trust.sock
+Native query and control socket.
+.TP
+.I /usr/share/ca-certificates/mozilla.crt
+Shipped CA bundle composed with local registry policy.
+.TP
+.I /system/retc/ssl
+Rendered compatibility store.
+.SH EXIT STATUS
+Zero on success, 2 when a requested entry is absent, 64 for command-line usage
+errors, and another nonzero status on failure.
+.SH SEE ALSO
+.BR trustd (8),
+.BR reg (1)

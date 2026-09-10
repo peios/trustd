@@ -70,7 +70,12 @@ pub const SERVER_AUTH: &str = "ServerAuth";
 
 /// Compose the store. `now` is seconds since the epoch, or `None` to skip
 /// expiry checks.
-pub fn compose(shipped_pem: &str, additions: &[Addition], distrust: &[String], now: Option<i64>) -> Result<Composed, String> {
+pub fn compose(
+    shipped_pem: &str,
+    additions: &[Addition],
+    distrust: &[String],
+    now: Option<i64>,
+) -> Result<Composed, String> {
     let mut out = Composed::default();
     let shipped = cert::from_pem(shipped_pem);
     if shipped.len() < MINIMUM_SHIPPED {
@@ -92,16 +97,22 @@ pub fn compose(shipped_pem: &str, additions: &[Addition], distrust: &[String], n
         match cert::parse(der, None) {
             Ok(parsed) => {
                 out.shipped += 1;
-                push(&mut out, &mut seen, &distrust, Entry {
-                    parsed,
-                    source: Source::Shipped,
-                    name: None,
-                    purposes: vec![SERVER_AUTH.to_owned()],
-                });
+                push(
+                    &mut out,
+                    &mut seen,
+                    &distrust,
+                    Entry {
+                        parsed,
+                        source: Source::Shipped,
+                        name: None,
+                        purposes: vec![SERVER_AUTH.to_owned()],
+                    },
+                );
             }
             Err(e) => {
                 out.skipped += 1;
-                out.warnings.push(format!("the shipped bundle holds an entry that is {e}"));
+                out.warnings
+                    .push(format!("the shipped bundle holds an entry that is {e}"));
             }
         }
     }
@@ -115,16 +126,22 @@ pub fn compose(shipped_pem: &str, additions: &[Addition], distrust: &[String], n
                 } else {
                     addition.purposes.clone()
                 };
-                push(&mut out, &mut seen, &distrust, Entry {
-                    parsed,
-                    source: Source::Added,
-                    name: Some(addition.name.clone()),
-                    purposes,
-                });
+                push(
+                    &mut out,
+                    &mut seen,
+                    &distrust,
+                    Entry {
+                        parsed,
+                        source: Source::Added,
+                        name: Some(addition.name.clone()),
+                        purposes,
+                    },
+                );
             }
             Err(e) => {
                 out.skipped += 1;
-                out.warnings.push(format!("Add\\{} is {e}; ignored", addition.name));
+                out.warnings
+                    .push(format!("Add\\{} is {e}; ignored", addition.name));
             }
         }
     }
@@ -138,9 +155,12 @@ pub fn compose(shipped_pem: &str, additions: &[Addition], distrust: &[String], n
         }
     }
 
-    out.roots.sort_by(|a, b| a.parsed.fingerprint.cmp(&b.parsed.fingerprint));
+    out.roots
+        .sort_by(|a, b| a.parsed.fingerprint.cmp(&b.parsed.fingerprint));
     if out.roots.is_empty() {
-        return Err("every root was distrusted or unusable; refusing to render an empty store".to_owned());
+        return Err(
+            "every root was distrusted or unusable; refusing to render an empty store".to_owned(),
+        );
     }
     Ok(out)
 }
@@ -150,10 +170,17 @@ fn push(out: &mut Composed, seen: &mut Vec<String>, distrust: &[String], entry: 
     let fingerprint = entry.parsed.fingerprint.clone();
     seen.push(fingerprint.clone());
     if distrust.iter().any(|f| *f == fingerprint) {
-        out.warnings.push(format!("{} is distrusted ({fingerprint})", entry.parsed.subject));
+        out.warnings.push(format!(
+            "{} is distrusted ({fingerprint})",
+            entry.parsed.subject
+        ));
         return;
     }
-    if out.roots.iter().any(|r| r.parsed.fingerprint == fingerprint) {
+    if out
+        .roots
+        .iter()
+        .any(|r| r.parsed.fingerprint == fingerprint)
+    {
         if entry.source == Source::Added {
             out.warnings.push(format!(
                 "Add\\{} duplicates a certificate already in the store; the store holds one copy",
@@ -168,12 +195,18 @@ fn push(out: &mut Composed, seen: &mut Vec<String>, distrust: &[String], entry: 
 /// Fingerprints are compared as lowercase hex with separators removed, so a
 /// value pasted from any tool matches.
 pub fn normalise_fingerprint(text: &str) -> String {
-    text.chars().filter(|c| c.is_ascii_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
+    text.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
 /// The roots that carry a purpose. v1 renders `ServerAuth`.
 pub fn for_purpose<'a>(roots: &'a [Entry], purpose: &str) -> Vec<&'a Entry> {
-    roots.iter().filter(|r| r.purposes.iter().any(|p| p.eq_ignore_ascii_case(purpose))).collect()
+    roots
+        .iter()
+        .filter(|r| r.purposes.iter().any(|p| p.eq_ignore_ascii_case(purpose)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -211,12 +244,25 @@ mod tests {
         let composed = compose(&bundle(&[COMODO, NETLOCK, MICROSEC]), &[], &[], None).unwrap();
         assert_eq!(composed.roots.len(), 3, "duplicates collapse");
         assert!(composed.roots.iter().all(|r| r.source == Source::Shipped));
-        assert!(composed.roots.iter().all(|r| r.purposes == vec![SERVER_AUTH]));
+        assert!(
+            composed
+                .roots
+                .iter()
+                .all(|r| r.purposes == vec![SERVER_AUTH])
+        );
         // Deterministic order, so an unchanged store renders identical bytes.
         let again = compose(&bundle(&[MICROSEC, COMODO, NETLOCK]), &[], &[], None).unwrap();
         assert_eq!(
-            composed.roots.iter().map(|r| &r.parsed.fingerprint).collect::<Vec<_>>(),
-            again.roots.iter().map(|r| &r.parsed.fingerprint).collect::<Vec<_>>()
+            composed
+                .roots
+                .iter()
+                .map(|r| &r.parsed.fingerprint)
+                .collect::<Vec<_>>(),
+            again
+                .roots
+                .iter()
+                .map(|r| &r.parsed.fingerprint)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -231,7 +277,11 @@ mod tests {
         let composed = compose(&shipped, &[addition], &[], None).unwrap();
         assert_eq!(composed.roots.len(), 3);
         assert_eq!(composed.added, 1);
-        let added = composed.roots.iter().find(|r| r.source == Source::Added).unwrap();
+        let added = composed
+            .roots
+            .iter()
+            .find(|r| r.source == Source::Added)
+            .unwrap();
         assert_eq!(added.name.as_deref(), Some("corp-ca"));
         assert_eq!(added.purposes.len(), 2);
         assert_eq!(for_purpose(&composed.roots, "codesigning").len(), 1);
@@ -254,13 +304,28 @@ mod tests {
         ] {
             let composed = compose(&shipped, &[], &[form.clone()], None).unwrap();
             assert_eq!(composed.roots.len(), 2, "form {form}");
-            assert!(!composed.roots.iter().any(|r| r.parsed.fingerprint == fingerprint_of(NETLOCK)));
+            assert!(
+                !composed
+                    .roots
+                    .iter()
+                    .any(|r| r.parsed.fingerprint == fingerprint_of(NETLOCK))
+            );
             assert_eq!(composed.distrusted, 1);
         }
         // An addition can be distrusted too — the mechanism does not care
         // where a certificate came from.
-        let addition = Addition { name: "corp-ca".into(), der: der_of(MICROSEC), purposes: vec![] };
-        let composed = compose(&bundle(&[COMODO, NETLOCK]), &[addition], &[fingerprint_of(MICROSEC)], None).unwrap();
+        let addition = Addition {
+            name: "corp-ca".into(),
+            der: der_of(MICROSEC),
+            purposes: vec![],
+        };
+        let composed = compose(
+            &bundle(&[COMODO, NETLOCK]),
+            &[addition],
+            &[fingerprint_of(MICROSEC)],
+            None,
+        )
+        .unwrap();
         assert_eq!(composed.roots.len(), 2);
     }
 
@@ -268,8 +333,16 @@ mod tests {
     fn a_bad_addition_is_skipped_and_the_store_survives() {
         let shipped = bundle(&[COMODO, NETLOCK, MICROSEC]);
         let additions = vec![
-            Addition { name: "rubbish".into(), der: vec![1, 2, 3], purposes: vec![] },
-            Addition { name: "empty".into(), der: vec![], purposes: vec![] },
+            Addition {
+                name: "rubbish".into(),
+                der: vec![1, 2, 3],
+                purposes: vec![],
+            },
+            Addition {
+                name: "empty".into(),
+                der: vec![],
+                purposes: vec![],
+            },
         ];
         let composed = compose(&shipped, &additions, &[], None).unwrap();
         assert_eq!(composed.roots.len(), 3, "the good roots are unaffected");
@@ -282,13 +355,19 @@ mod tests {
     fn an_expired_addition_is_refused_but_an_expired_shipped_root_is_reported() {
         let parsed = cert::parse(&der_of(COMODO), None).unwrap();
         let after = parsed.not_after + 1;
-        let addition = Addition { name: "old".into(), der: der_of(COMODO), purposes: vec![] };
-        let composed = compose(&bundle(&[NETLOCK, MICROSEC]), &[addition], &[], Some(after)).unwrap();
+        let addition = Addition {
+            name: "old".into(),
+            der: der_of(COMODO),
+            purposes: vec![],
+        };
+        let composed =
+            compose(&bundle(&[NETLOCK, MICROSEC]), &[addition], &[], Some(after)).unwrap();
         assert_eq!(composed.skipped, 1);
         assert!(composed.warnings[0].contains("expired"));
         // The shipped bundle is not expiry-checked here: that is the
         // package's problem to surface, not a reason to shrink the store.
-        let composed = compose(&bundle(&[COMODO, NETLOCK, MICROSEC]), &[], &[], Some(after)).unwrap();
+        let composed =
+            compose(&bundle(&[COMODO, NETLOCK, MICROSEC]), &[], &[], Some(after)).unwrap();
         assert_eq!(composed.roots.len(), 3);
     }
 
@@ -300,7 +379,10 @@ mod tests {
         let err = compose(&format!("{COMODO}{NETLOCK}"), &[], &[], None).unwrap_err();
         assert!(err.contains("below the floor"), "{err}");
         // Everything distrusted: refuse rather than empty the machine's trust.
-        let all: Vec<String> = [COMODO, NETLOCK, MICROSEC].iter().map(|p| fingerprint_of(p)).collect();
+        let all: Vec<String> = [COMODO, NETLOCK, MICROSEC]
+            .iter()
+            .map(|p| fingerprint_of(p))
+            .collect();
         let err = compose(&bundle(&[COMODO, NETLOCK, MICROSEC]), &[], &all, None).unwrap_err();
         assert!(err.contains("empty store"), "{err}");
     }
@@ -309,7 +391,12 @@ mod tests {
     fn a_distrust_for_an_absent_certificate_stays_in_force() {
         let composed = compose(&bundle(&[COMODO]), &[], &[format!("{:064x}", 1)], None).unwrap();
         assert_eq!(composed.distrusted, 1);
-        assert!(composed.warnings.iter().any(|w| w.contains("matches no certificate")));
+        assert!(
+            composed
+                .warnings
+                .iter()
+                .any(|w| w.contains("matches no certificate"))
+        );
         assert_eq!(composed.roots.len(), 1);
     }
 }

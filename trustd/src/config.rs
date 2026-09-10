@@ -18,7 +18,10 @@
 //!       <sha256 fingerprint> REG_SZ      why, for whoever reads it later
 //! ```
 
-use libtrust::{ADD_KEY, CERTIFICATE_VALUE, COMPAT_VALUE, CONTROL_SECURITY_VALUE, DISTRUST_KEY, PURPOSES_VALUE, TRUST_KEY};
+use libtrust::{
+    ADD_KEY, CERTIFICATE_VALUE, COMPAT_VALUE, CONTROL_SECURITY_VALUE, DISTRUST_KEY, PURPOSES_VALUE,
+    TRUST_KEY,
+};
 use peios::registry::{Key, KeyAccess, OpenFlags, RegValue, ValueType};
 
 use crate::log;
@@ -36,7 +39,12 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { additions: Vec::new(), distrust: Vec::new(), compat: Compat::Files, control_security: None }
+        Config {
+            additions: Vec::new(),
+            distrust: Vec::new(),
+            compat: Compat::Files,
+            control_security: None,
+        }
     }
 }
 
@@ -67,7 +75,13 @@ fn read(key: &Key, name: &str) -> Option<RegValue> {
 }
 
 fn open(parent: Option<&Key>, path: &str) -> Option<Key> {
-    Key::open(parent, path, KeyAccess::QUERY_VALUE | KeyAccess::ENUMERATE_SUB_KEYS, OpenFlags::empty()).ok()
+    Key::open(
+        parent,
+        path,
+        KeyAccess::QUERY_VALUE | KeyAccess::ENUMERATE_SUB_KEYS,
+        OpenFlags::empty(),
+    )
+    .ok()
 }
 
 pub fn load() -> Config {
@@ -80,7 +94,9 @@ pub fn load() -> Config {
     };
     if let Some(v) = read(&root, COMPAT_VALUE) {
         if v.ty == ValueType::DWORD && v.data.len() == 4 {
-            config.compat = Compat::from_dword(u32::from_le_bytes([v.data[0], v.data[1], v.data[2], v.data[3]]));
+            config.compat = Compat::from_dword(u32::from_le_bytes([
+                v.data[0], v.data[1], v.data[2], v.data[3],
+            ]));
         }
     }
     config.control_security = read(&root, CONTROL_SECURITY_VALUE)
@@ -94,8 +110,12 @@ pub fn load() -> Config {
     if let Some(add) = open(Some(&certificates), ADD_KEY) {
         for subkey in add.subkeys(None) {
             let Ok(subkey) = subkey else { continue };
-            let Ok(name) = String::from_utf8(subkey.name.clone()) else { continue };
-            let Some(entry) = open(Some(&add), &name) else { continue };
+            let Ok(name) = String::from_utf8(subkey.name.clone()) else {
+                continue;
+            };
+            let Some(entry) = open(Some(&add), &name) else {
+                continue;
+            };
             let Some(certificate) = read(&entry, CERTIFICATE_VALUE) else {
                 // A key with no certificate is an entry mid-write (the
                 // certificate is written last, exactly so this state is
@@ -103,18 +123,28 @@ pub fn load() -> Config {
                 continue;
             };
             if certificate.ty != ValueType::BINARY || certificate.data.is_empty() {
-                log::warn(format_args!("Add\\{name}: {CERTIFICATE_VALUE} is not a non-empty REG_BINARY; ignored"));
+                log::warn(format_args!(
+                    "Add\\{name}: {CERTIFICATE_VALUE} is not a non-empty REG_BINARY; ignored"
+                ));
                 continue;
             }
-            let purposes = read(&entry, PURPOSES_VALUE).and_then(|v| multi(&v)).unwrap_or_default();
-            config.additions.push(Addition { name, der: certificate.data, purposes });
+            let purposes = read(&entry, PURPOSES_VALUE)
+                .and_then(|v| multi(&v))
+                .unwrap_or_default();
+            config.additions.push(Addition {
+                name,
+                der: certificate.data,
+                purposes,
+            });
         }
     }
 
     if let Some(distrust) = open(Some(&certificates), DISTRUST_KEY) {
         for value in distrust.values(None) {
             let Ok(value) = value else { continue };
-            let Ok(name) = String::from_utf8(value.name.clone()) else { continue };
+            let Ok(name) = String::from_utf8(value.name.clone()) else {
+                continue;
+            };
             let fingerprint = normalise_fingerprint(&name);
             if fingerprint.len() != 64 || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) {
                 log::warn(format_args!(

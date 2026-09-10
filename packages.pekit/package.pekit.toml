@@ -1,23 +1,13 @@
-# Base metadata for the packages carved from the trustd build tree.
-#
-#   trustd  the trust store. Composes the shipped roots with the registry's
-#           additions and distrusts, serves the result, renders the compat
-#           files. Holds no key and no secret.
-#   trust   its operator command. Reads over the socket, writes to the
-#           registry.
-#
-# Two packages because `trust list` should work on a machine that gets its
-# trust some other way, and because a command every user may run should not
-# drag a daemon in with it.
-#
-# Neither declares a dependency on ca-certificates. trustd needs *a* bundle
-# at /usr/share/ca-certificates/mozilla.crt, and an image that composes its
-# own root store from somewhere else is a legitimate thing to build; the
-# image manifest states the coupling instead.
+# Shared metadata for the production trustd package family. The composite
+# expression is the exact selected licence closure of the locked Linux build:
+# Peios elects MIT from permissive alternatives; Apache-only, BSD, ISC, and
+# Unicode terms remain independently required by other crates.
 
 format = "peipkg"
 
 [package]
-version      = "{{version}}-10"
+version      = "{{version}}-1"
 architecture = "x86_64"
-license      = "MIT"
+license      = "MIT AND Apache-2.0 AND BSD-3-Clause AND ISC AND Unicode-3.0"
+license_class = "free"
+homepage      = "https://peios.org"
