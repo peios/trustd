@@ -1,0 +1,11 @@
+[package]
+name        = "dev.peios.trust-debuginfo"
+description = "Debugging symbols for the Peios machine-trust client"
+
+[dependencies]
+"dev.peios.trust" = "= {{version}}-1"
+
+[files]
+"@source:LICENSE"                 = "usr/share/licenses/dev.peios.trust-debuginfo/LICENSE"
+":licenses/**"                    = "usr/share/licenses/dev.peios.trust-debuginfo/third-party"
+":debug/trust/usr/lib/debug/**"   = "usr/lib/debug"

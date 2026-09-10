@@ -27,7 +27,8 @@ use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 
 use libtrust::{
-    ADD_KEY, CERTIFICATE_VALUE, CERTIFICATES_KEY, DISTRUST_KEY, PURPOSES_VALUE, Reply, Request, Root, SOCKET_PATH, Source,
+    ADD_KEY, CERTIFICATE_VALUE, CERTIFICATES_KEY, DISTRUST_KEY, PURPOSES_VALUE, Reply, Request,
+    Root, SOCKET_PATH, Source,
 };
 use peios::registry::{CreateFlags, Key, KeyAccess, ValueType};
 use trustd::cert;
@@ -69,7 +70,9 @@ fn open_or_create_under(parent: &Key, name: &str) -> Result<Key, String> {
 /// error number.
 fn describe_registry_error(path: &str, error: peios::Error) -> String {
     if error.raw_os_error() == Some(libc::EACCES) || error.raw_os_error() == Some(libc::EPERM) {
-        format!("not permitted to change {path} — changing what this machine trusts is governed by that key's descriptor")
+        format!(
+            "not permitted to change {path} — changing what this machine trusts is governed by that key's descriptor"
+        )
     } else {
         format!("{path}: {error}")
     }
@@ -86,7 +89,9 @@ fn certificates(which: &str) -> Result<Key, String> {
 fn read_input(path: &str) -> Result<Vec<u8>, String> {
     let text = if path == "-" {
         let mut buffer = Vec::new();
-        std::io::stdin().read_to_end(&mut buffer).map_err(|e| format!("stdin: {e}"))?;
+        std::io::stdin()
+            .read_to_end(&mut buffer)
+            .map_err(|e| format!("stdin: {e}"))?;
         buffer
     } else {
         std::fs::read(path).map_err(|e| format!("{path}: {e}"))?
@@ -95,7 +100,10 @@ fn read_input(path: &str) -> Result<Vec<u8>, String> {
     if let Ok(as_text) = std::str::from_utf8(&text) {
         let certificates = cert::from_pem(as_text);
         if certificates.len() > 1 {
-            return Err(format!("{path} holds {} certificates; add them one at a time", certificates.len()));
+            return Err(format!(
+                "{path} holds {} certificates; add them one at a time",
+                certificates.len()
+            ));
         }
         if let Some(der) = certificates.into_iter().next() {
             return Ok(der);
@@ -145,14 +153,20 @@ fn add(name: &str, path: &str, purposes: &[String]) -> ExitCode {
             data.push(0);
         }
         data.push(0);
-        if let Err(e) = add.set_value(PURPOSES_VALUE.as_bytes(), ValueType::MULTI_SZ, &data).call() {
+        if let Err(e) = add
+            .set_value(PURPOSES_VALUE.as_bytes(), ValueType::MULTI_SZ, &data)
+            .call()
+        {
             eprintln!("trust: could not set {PURPOSES_VALUE}: {e}");
             return ExitCode::FAILURE;
         }
     }
     // The certificate goes last: until it exists the entry is incomplete,
     // and trustd skips incomplete entries rather than acting on half of one.
-    if let Err(e) = add.set_value(CERTIFICATE_VALUE.as_bytes(), ValueType::BINARY, &der).call() {
+    if let Err(e) = add
+        .set_value(CERTIFICATE_VALUE.as_bytes(), ValueType::BINARY, &der)
+        .call()
+    {
         eprintln!("trust: could not set {CERTIFICATE_VALUE}: {e}");
         return ExitCode::FAILURE;
     }
@@ -173,7 +187,12 @@ fn remove(name: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let entry = match Key::open(Some(&add), name, KeyAccess::DELETE, peios::registry::OpenFlags::empty()) {
+    let entry = match Key::open(
+        Some(&add),
+        name,
+        KeyAccess::DELETE,
+        peios::registry::OpenFlags::empty(),
+    ) {
         Ok(key) => key,
         Err(_) => {
             eprintln!("trust: no addition named {name}");
@@ -186,7 +205,10 @@ fn remove(name: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("trust: {}", describe_registry_error(&format!("{CERTIFICATES_KEY}\\{ADD_KEY}\\{name}"), e));
+            eprintln!(
+                "trust: {}",
+                describe_registry_error(&format!("{CERTIFICATES_KEY}\\{ADD_KEY}\\{name}"), e)
+            );
             ExitCode::FAILURE
         }
     }
@@ -207,18 +229,25 @@ fn target_fingerprint(argument: &str) -> Result<String, String> {
     }
     if looks_hex && normalised.len() >= 8 {
         let list = roots(false, None)?;
-        let matches: Vec<&Root> = list.iter().filter(|r| r.fingerprint.starts_with(&normalised)).collect();
+        let matches: Vec<&Root> = list
+            .iter()
+            .filter(|r| r.fingerprint.starts_with(&normalised))
+            .collect();
         return match matches.as_slice() {
             [root] => Ok(root.fingerprint.clone()),
             [] => Err(format!(
                 "no certificate in the store starts with {normalised} — give the whole fingerprint if you mean one the store does not have"
             )),
-            many => Err(format!("{normalised} matches {} certificates; be more specific", many.len())),
+            many => Err(format!(
+                "{normalised} matches {} certificates; be more specific",
+                many.len()
+            )),
         };
     }
     let der = read_input(argument)?;
-    let parsed = cert::parse(&der, None)
-        .map_err(|e| format!("{argument} is neither a SHA-256 fingerprint nor a certificate ({e})"))?;
+    let parsed = cert::parse(&der, None).map_err(|e| {
+        format!("{argument} is neither a SHA-256 fingerprint nor a certificate ({e})")
+    })?;
     Ok(parsed.fingerprint)
 }
 
@@ -240,12 +269,17 @@ fn distrust(argument: &str, reason: &str) -> ExitCode {
     // Look before writing: afterwards trustd has already dropped the
     // certificate, so asking then would always answer "no match" and say
     // the opposite of the truth.
-    let was = roots(false, None)
-        .ok()
-        .and_then(|list| list.into_iter().find(|r| r.fingerprint == fingerprint).map(|r| r.subject));
+    let was = roots(false, None).ok().and_then(|list| {
+        list.into_iter()
+            .find(|r| r.fingerprint == fingerprint)
+            .map(|r| r.subject)
+    });
     let mut data = reason.as_bytes().to_vec();
     data.push(0);
-    if let Err(e) = key.set_value(fingerprint.as_bytes(), ValueType::SZ, &data).call() {
+    if let Err(e) = key
+        .set_value(fingerprint.as_bytes(), ValueType::SZ, &data)
+        .call()
+    {
         eprintln!("trust: could not write the distrust: {e}");
         return ExitCode::FAILURE;
     }
@@ -255,7 +289,9 @@ fn distrust(argument: &str, reason: &str) -> ExitCode {
     // so say which happened.
     match was {
         Some(subject) => println!("  was: {subject}"),
-        None => println!("  no certificate in the store matched; the entry stays in force in case one arrives"),
+        None => println!(
+            "  no certificate in the store matched; the entry stays in force in case one arrives"
+        ),
     }
     ExitCode::SUCCESS
 }
@@ -269,8 +305,14 @@ fn distrust_entries() -> Result<Vec<(String, String)>, String> {
     let mut out = Vec::new();
     for value in key.values(None) {
         let Ok(value) = value else { continue };
-        let Ok(name) = String::from_utf8(value.name.clone()) else { continue };
-        let end = value.data.iter().position(|&b| b == 0).unwrap_or(value.data.len());
+        let Ok(name) = String::from_utf8(value.name.clone()) else {
+            continue;
+        };
+        let end = value
+            .data
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(value.data.len());
         let reason = String::from_utf8_lossy(&value.data[..end]).into_owned();
         out.push((normalise_fingerprint(&name), reason));
     }
@@ -286,8 +328,10 @@ fn restore(argument: &str) -> ExitCode {
         // Resolve against what is distrusted, not against the store.
         match distrust_entries() {
             Ok(entries) => {
-                let matches: Vec<&(String, String)> =
-                    entries.iter().filter(|(f, _)| f.starts_with(&normalised)).collect();
+                let matches: Vec<&(String, String)> = entries
+                    .iter()
+                    .filter(|(f, _)| f.starts_with(&normalised))
+                    .collect();
                 match matches.as_slice() {
                     [(f, _)] => f.clone(),
                     [] => {
@@ -295,7 +339,10 @@ fn restore(argument: &str) -> ExitCode {
                         return ExitCode::from(2);
                     }
                     many => {
-                        eprintln!("trust: {normalised} matches {} distrust entries; be more specific", many.len());
+                        eprintln!(
+                            "trust: {normalised} matches {} distrust entries; be more specific",
+                            many.len()
+                        );
                         return ExitCode::FAILURE;
                     }
                 }
@@ -323,7 +370,10 @@ fn restore(argument: &str) -> ExitCode {
             ExitCode::from(2)
         }
         Err(e) => {
-            eprintln!("trust: {}", describe_registry_error(&format!("{CERTIFICATES_KEY}\\{DISTRUST_KEY}"), e));
+            eprintln!(
+                "trust: {}",
+                describe_registry_error(&format!("{CERTIFICATES_KEY}\\{DISTRUST_KEY}"), e)
+            );
             ExitCode::FAILURE
         }
     }
@@ -339,7 +389,10 @@ fn list_distrusted() -> ExitCode {
     };
     for (fingerprint, reason) in &entries {
         if reason.is_empty() {
-            println!("{}  {fingerprint}", &fingerprint[..16.min(fingerprint.len())]);
+            println!(
+                "{}  {fingerprint}",
+                &fingerprint[..16.min(fingerprint.len())]
+            );
         } else {
             println!("{}  {reason}", &fingerprint[..16.min(fingerprint.len())]);
         }
@@ -362,7 +415,12 @@ fn list(purpose: Option<String>) -> ExitCode {
             Source::Added => format!("added:{}", root.name.clone().unwrap_or_default()),
             Source::Shipped => "shipped".to_owned(),
         };
-        println!("{}  {:<9}  {}", &root.fingerprint[..16], origin, root.subject);
+        println!(
+            "{}  {:<9}  {}",
+            &root.fingerprint[..16],
+            origin,
+            root.subject
+        );
     }
     println!();
     println!("{} root(s)", list.len());
@@ -378,7 +436,10 @@ fn show(prefix: &str, pem_only: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let matches: Vec<&Root> = list.iter().filter(|r| r.fingerprint.starts_with(&wanted)).collect();
+    let matches: Vec<&Root> = list
+        .iter()
+        .filter(|r| r.fingerprint.starts_with(&wanted))
+        .collect();
     match matches.as_slice() {
         [] => {
             eprintln!("trust: no root in the store matches {prefix}");
@@ -402,7 +463,10 @@ fn show(prefix: &str, pem_only: bool) -> ExitCode {
             ExitCode::SUCCESS
         }
         many => {
-            eprintln!("trust: {prefix} matches {} roots; be more specific", many.len());
+            eprintln!(
+                "trust: {prefix} matches {} roots; be more specific",
+                many.len()
+            );
             for root in many {
                 eprintln!("  {}  {}", &root.fingerprint[..16], root.subject);
             }
@@ -428,7 +492,14 @@ fn status() -> ExitCode {
         _ => return ExitCode::FAILURE,
     };
     println!("generation   {}", status.generation);
-    println!("health       {}{}", status.health.as_str(), status.message.map(|m| format!(" — {m}")).unwrap_or_default());
+    println!(
+        "health       {}{}",
+        status.health.as_str(),
+        status
+            .message
+            .map(|m| format!(" — {m}"))
+            .unwrap_or_default()
+    );
     println!("roots        {} in force", status.effective);
     println!("  shipped    {}", status.shipped);
     println!("  added      {}", status.added);
@@ -472,6 +543,11 @@ fn usage() -> ExitCode {
     ExitCode::from(64)
 }
 
+fn version() -> ExitCode {
+    println!("trust {}", env!("CARGO_PKG_VERSION"));
+    ExitCode::SUCCESS
+}
+
 /// Pull `--flag value` out of the arguments, leaving the positionals.
 fn take_option(args: &mut Vec<String>, flag: &str) -> Option<String> {
     let at = args.iter().position(|a| a == flag)?;
@@ -493,7 +569,12 @@ fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let purpose = take_option(&mut args, "--purpose");
     let purposes = take_option(&mut args, "--purposes")
-        .map(|v| v.split(',').map(|p| p.trim().to_owned()).filter(|p| !p.is_empty()).collect::<Vec<_>>())
+        .map(|v| {
+            v.split(',')
+                .map(|p| p.trim().to_owned())
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
     let pem_only = args.iter().any(|a| a == "--pem");
     args.retain(|a| a != "--pem");
@@ -502,6 +583,16 @@ fn main() -> ExitCode {
         .unwrap_or_default();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
+        ["--help"] | ["-h"] | ["help"] => {
+            eprintln!(
+                "usage: trust list [--purpose P] | show <fingerprint> [--pem] | status\n\
+                 \x20      trust add <name> <file|-> [--purposes A,B] | remove <name>\n\
+                 \x20      trust distrust <fingerprint|file> [--reason R] | restore <fingerprint>\n\
+                 \x20      trust reload"
+            );
+            ExitCode::SUCCESS
+        }
+        ["--version"] | ["-V"] | ["version"] => version(),
         ["list"] => list(purpose),
         ["list", "--distrusted"] | ["distrusted"] => list_distrusted(),
         ["show", prefix] => show(prefix, pem_only),

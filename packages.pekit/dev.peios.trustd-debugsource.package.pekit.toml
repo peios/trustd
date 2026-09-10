@@ -1,0 +1,13 @@
+[package]
+name         = "dev.peios.trustd-debugsource"
+architecture = "x86_64"
+description  = "Debug sources for the Peios trust service and client"
+
+[dependencies]
+"dev.peios.trustd-debuginfo" = "= {{version}}-1"
+"dev.peios.trust-debuginfo"  = "= {{version}}-1"
+
+[files]
+"@source:LICENSE"   = "usr/share/licenses/dev.peios.trustd-debugsource/LICENSE"
+":licenses/**"      = "usr/share/licenses/dev.peios.trustd-debugsource/third-party"
+":usr/src/debug/**" = "usr/src/debug"

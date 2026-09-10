@@ -1,81 +1,322 @@
-# trustd — the Peios trust store — and trust, its operator command. One
-# cargo workspace, two packages; see packages.pekit/.
-#
-# The libpeios bootstrap mirrors netd's and resolvd's: pkg-config rather
-# than PEIOS_LIB_DIR, so peios-sys does not bake a checkout-local rpath into
-# a shipped binary, and a synthesized peios.pc from the sibling trees when
-# libpeios-devel is not installed in the build root.
+# trustd — Peios's machine trust authority and its stateless operator client.
+# One locked offline Rust build emits two runtime boundaries, one debuginfo
+# package per executable, shared exact debug sources, and corresponding source.
 
 out_dir = "out"
 
-[build]
-command = """
+[source_package]
+name = "dev.peios.trustd-source"
+
+[build.vendor]
+command = '''
+set -eu
+SRC=$(pwd -P)
+export SRC
+export CARGO_HOME=$PEKIT_OUT/cargo-home
+mkdir -p "$CARGO_HOME" "$PEKIT_OUT"
+
+# Materialise the exact locked graph at the sole network boundary, then switch
+# Cargo to that vendor tree before inspecting the complete graph offline.
+cargo vendor --locked "$PEKIT_OUT/vendor" > "$PEKIT_OUT/cargo-config.toml"
+test -s "$PEKIT_OUT/cargo-config.toml"
+test -n "$(find "$PEKIT_OUT/vendor" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+cp "$PEKIT_OUT/cargo-config.toml" "$CARGO_HOME/config.toml"
+
+# Cargo does not vendor path dependencies. Refuse sibling state that would be
+# absent from the corresponding-source package and mutable across rebuilds.
+cargo metadata --locked --offline --format-version 1 |
+  python3 -c '
+import json, os, pathlib, sys
+metadata = json.load(sys.stdin)
+root = pathlib.Path(os.environ["SRC"]).resolve()
+members = set(metadata["workspace_members"])
+external_paths = []
+for package in metadata["packages"]:
+    if package["id"] in members or package.get("source") is not None:
+        continue
+    manifest = pathlib.Path(package["manifest_path"]).resolve()
+    try:
+        manifest.relative_to(root)
+    except ValueError:
+        external_paths.append(str(manifest))
+if external_paths:
+    raise SystemExit(
+        "trustd: mutable sibling Cargo dependencies are not publishable:\n  "
+        + "\n  ".join(sorted(external_paths))
+    )
+'
+'''
+
+[build.vendor.dependencies.peipkg]
+"dev.peios.build-essentials-rust" = ">= 1.0.0-9"
+"org.python.python3"              = "*"
+
+[build.vendor.dependencies.apt]
+cargo     = "*"
+rustc     = "*"
+python3   = "*"
+findutils = "*"
+
+[build.main]
+needs = ["vendor"]
+command = '''
 set -eu
 set -o pipefail 2>/dev/null || true
 
-SRC="$(pwd)"
-REPO_ROOT="$(cd "$SRC/.." && pwd)"
+SRC=$(pwd -P)
+DEBUG_PREFIX=/usr/src/debug/dev.peios.trustd
+DEBUG_ROOT=$PEKIT_OUT$DEBUG_PREFIX
+export CARGO_HOME=$PEKIT_OUT/cargo-home
+export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
+mkdir -p "$CARGO_HOME"
+cp "$PEKIT_VENDOR_OUT/cargo-config.toml" "$CARGO_HOME/config.toml"
 
-for tool in cargo rustc gcc pkg-config; do
-  command -v "$tool" >/dev/null || { echo "missing required trustd build tool: $tool" >&2; exit 1; }
-done
-
-unset PEIOS_LIB_DIR PEIOS_INCLUDE PKM_UAPI
-
-if ! pkg-config --exists peios; then
-  LIBPEIOS_ROOT="$REPO_ROOT/libpeios"
-  PKM_UAPI_ROOT="$REPO_ROOT/pkm/out/build/headers/usr/include"
-  [ -f "$LIBPEIOS_ROOT/Cargo.toml" ] || { echo "libpeios not found at $LIBPEIOS_ROOT" >&2; exit 1; }
-  [ -d "$LIBPEIOS_ROOT/include/peios" ] || { echo "libpeios headers not found" >&2; exit 1; }
-  [ -d "$PKM_UAPI_ROOT/pkm" ] || { echo "pkm UAPI headers not found at $PKM_UAPI_ROOT" >&2; exit 1; }
-  cargo build --release --locked --manifest-path "$LIBPEIOS_ROOT/Cargo.toml"
-  PC_DIR="$PEKIT_OUT/pkgconfig"
-  mkdir -p "$PC_DIR"
-  LIBPEIOS_VERSION="$(sed -n 's/^version = "\\([^"]*\\)".*/\\1/p' "$LIBPEIOS_ROOT/Cargo.toml" | head -1)"
-  {
-    printf 'prefix=%s\\n' "$LIBPEIOS_ROOT"
-    printf 'exec_prefix=${prefix}\\n'
-    printf 'libdir=%s/target/release\\n' "$LIBPEIOS_ROOT"
-    printf 'includedir=%s/include\\n' "$LIBPEIOS_ROOT"
-    printf '\\n'
-    printf 'Name: peios\\n'
-    printf 'Description: Peios userspace C ABI library (libpeios)\\n'
-    printf 'Version: %s\\n' "$LIBPEIOS_VERSION"
-    printf 'Libs: -L${libdir} -lpeios\\n'
-    printf 'Cflags: -I${includedir} -I%s\\n' "$PKM_UAPI_ROOT"
-  } > "$PC_DIR/peios.pc"
-  export PKG_CONFIG_PATH="$PC_DIR${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+# Peiosutils remains the installed command suite. GNU compatibility is kept
+# in the build-only directory for conventional install/chmod semantics.
+if test -d /usr/libexec/coreutils-build; then
+  export PATH=/usr/libexec/coreutils-build:$PATH
 fi
 
+for tool in cargo rustc gcc pkg-config python3 objcopy strip readelf debugedit gzip dash; do
+  command -v "$tool" >/dev/null || {
+    echo "trustd: missing required build tool: $tool" >&2
+    exit 1
+  }
+done
+
+# The native package contract is the released libpeios ABI, not a sibling
+# checkout or an ad-hoc library path. peios-sys finds its headers and library
+# exclusively through this package's pkg-config interface.
+unset PEIOS_LIB_DIR PEIOS_INCLUDE PKM_UAPI
+test "$(pkg-config --modversion peios)" = 0.5.0 || {
+  echo "trustd: dev.peios.libpeios-devel 0.5.0 is required" >&2
+  exit 1
+}
 export BINDGEN_EXTRA_CLANG_ARGS="-isystem $(gcc -print-file-name=include) ${BINDGEN_EXTRA_CLANG_ARGS:-}"
 
-cargo build --release --locked --bin trustd --bin trust --target-dir "$PEKIT_OUT/target"
+cargo metadata --locked --offline --no-deps --format-version 1 |
+  python3 -c '
+import json, os, sys
+metadata = json.load(sys.stdin)
+members = set(metadata["workspace_members"])
+versions = sorted({p["version"] for p in metadata["packages"] if p["id"] in members})
+expected = os.environ["PEKIT_VERSION"]
+if versions != [expected]:
+    raise SystemExit(f"trustd: workspace versions {versions!r} do not equal package version {expected!r}")
+'
 
-mkdir -p "$PEKIT_OUT/usr/sbin" "$PEKIT_OUT/usr/bin"
-install -m 0755 "$PEKIT_OUT/target/release/trustd" "$PEKIT_OUT/usr/sbin/trustd"
-install -m 0755 "$PEKIT_OUT/target/release/trust" "$PEKIT_OUT/usr/bin/trust"
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$PEKIT_WORKSPACE_ROOT=$DEBUG_PREFIX/.workspace --remap-path-prefix=$PEKIT_OUT_BASE=$DEBUG_PREFIX/.build --remap-path-prefix=$SRC=$DEBUG_PREFIX --remap-path-prefix=$PEKIT_VENDOR_OUT/vendor=$DEBUG_PREFIX/vendor"
 
-# The pre-start hook that gives trustd a directory it can own; see the
-# script and trustd-service.reg for why a least-privileged daemon needs one.
-mkdir -p "$PEKIT_OUT/usr/libexec/trustd"
+# The test build exercises the complete workspace. Two independent release
+# target trees must then produce byte-identical unstripped binaries.
+cargo test --release --workspace --locked --offline --target-dir "$PEKIT_OUT/target-test"
+for target in target-a target-b; do
+  CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=off \
+    cargo build --release --workspace --locked --offline \
+      --target-dir "$PEKIT_OUT/$target"
+done
+cmp "$PEKIT_OUT/target-a/release/trustd" "$PEKIT_OUT/target-b/release/trustd"
+cmp "$PEKIT_OUT/target-a/release/trust" "$PEKIT_OUT/target-b/release/trust"
+TARGET=$PEKIT_OUT/target-a
+
+mkdir -p "$PEKIT_OUT/usr/sbin" "$PEKIT_OUT/usr/bin" \
+         "$PEKIT_OUT/usr/libexec/trustd" "$PEKIT_OUT/usr/share/regim" \
+         "$PEKIT_OUT/usr/share/regman" "$PEKIT_OUT/usr/share/man/man1" \
+         "$PEKIT_OUT/usr/share/man/man8"
+install -m 0755 "$TARGET/release/trustd" "$PEKIT_OUT/usr/sbin/trustd"
+install -m 0755 "$TARGET/release/trust" "$PEKIT_OUT/usr/bin/trust"
 install -m 0755 "$SRC/libexec/prepare-store" "$PEKIT_OUT/usr/libexec/trustd/prepare-store"
-
-# Seeds are offered, not applied: an image opts in with [registry] autoapply.
-mkdir -p "$PEKIT_OUT/usr/share/regim" "$PEKIT_OUT/usr/share/regman"
 install -m 0644 "$SRC/registry.d/trustd-service.reg" "$PEKIT_OUT/usr/share/regim/trustd-service.reg"
 install -m 0644 "$SRC/trustd.regman" "$PEKIT_OUT/usr/share/regman/trustd.regman"
-"""
+gzip -n -9 -c "$SRC/man/trust.1" > "$PEKIT_OUT/usr/share/man/man1/trust.1.gz"
+gzip -n -9 -c "$SRC/man/trustd.8" > "$PEKIT_OUT/usr/share/man/man8/trustd.8.gz"
 
-[build.dependencies.peipkg]
-cargo = "*"
-rust = "*"
-gcc = "*"
-pkgconf-pkg-config = "*"
-libpeios-devel = "*"
-kernel-headers = "*"
+# Preserve an auditable exact dependency table and every upstream notice.
+python3 "$SRC/tools/collect-rust-metadata.py" --licence-root "$PEKIT_OUT/licenses"
+grep -F "bindgen	0.70.1	BSD-3-Clause	" "$PEKIT_OUT/licenses/crate-licenses.tsv" >/dev/null
+grep -F "libloading	0.8.9	ISC	" "$PEKIT_OUT/licenses/crate-licenses.tsv" >/dev/null
+grep -F "unicode-ident	1.0.24	(MIT OR Apache-2.0) AND Unicode-3.0	" "$PEKIT_OUT/licenses/crate-licenses.tsv" >/dev/null
+
+: > "$PEKIT_OUT/.debug-sources"
+split_debug() {
+  component=$1
+  elf=$2
+  list=$PEKIT_OUT/.debug-$component
+  debugedit -b "$SRC" -d "$DEBUG_PREFIX" -l "$list" -n "$elf"
+  cat "$list" >> "$PEKIT_OUT/.debug-sources"
+  build_id=$(readelf -n "$elf" | sed -n 's/^[[:space:]]*Build ID: //p' | head -1)
+  test -n "$build_id"
+  first=$(printf %s "$build_id" | cut -c1-2)
+  rest=$(printf %s "$build_id" | cut -c3-)
+  debug=$PEKIT_OUT/debug/$component/usr/lib/debug/.build-id/$first/$rest.debug
+  mkdir -p "$(dirname "$debug")"
+  objcopy --only-keep-debug "$elf" "$debug"
+  strip --strip-unneeded "$elf"
+  objcopy --add-gnu-debuglink="$debug" "$elf"
+  rm -f "$list"
+}
+
+split_debug trustd "$PEKIT_OUT/usr/sbin/trustd"
+split_debug trust "$PEKIT_OUT/usr/bin/trust"
+
+mkdir -p "$DEBUG_ROOT"
+tr '\0' '\n' < "$PEKIT_OUT/.debug-sources" | LC_ALL=C sort -u |
+while IFS= read -r source; do
+  test -n "$source" || continue
+  case "$source" in */) continue ;; esac
+  case "$source" in
+    "$DEBUG_PREFIX"/vendor/*)
+      relative=${source#"$DEBUG_PREFIX"/}
+      origin=$PEKIT_VENDOR_OUT/$relative
+      ;;
+    "$DEBUG_PREFIX"/*)
+      relative=${source#"$DEBUG_PREFIX"/}
+      origin=$SRC/$relative
+      ;;
+    vendor/*)
+      relative=$source
+      origin=$PEKIT_VENDOR_OUT/$source
+      ;;
+    *)
+      relative=$source
+      origin=$SRC/$source
+      ;;
+  esac
+  test -f "$origin" || continue
+  mkdir -p "$DEBUG_ROOT/$(dirname "$relative")"
+  cp "$origin" "$DEBUG_ROOT/$relative"
+done
+rm -f "$PEKIT_OUT/.debug-sources"
+test -n "$(find "$DEBUG_ROOT" -type f -print -quit)"
+
+# Installed command, manual, service, registry and privileged-hook contracts.
+test "$("$PEKIT_OUT/usr/bin/trust" --version)" = "trust $PEKIT_VERSION"
+test "$("$PEKIT_OUT/usr/sbin/trustd" --version)" = "trustd $PEKIT_VERSION"
+"$PEKIT_OUT/usr/bin/trust" --help 2>&1 | grep -F 'trust distrust' >/dev/null
+"$PEKIT_OUT/usr/sbin/trustd" --help 2>&1 | grep -Fx 'usage: trustd' >/dev/null
+gzip -t "$PEKIT_OUT/usr/share/man/man1/trust.1.gz"
+gzip -t "$PEKIT_OUT/usr/share/man/man8/trustd.8.gz"
+dash -n "$PEKIT_OUT/usr/libexec/trustd/prepare-store"
+
+python3 - "$PEKIT_OUT" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+service = json.loads((root / "usr/share/regim/trustd-service.reg").read_text())
+values = {
+    value["name"]: value["data"]
+    for key in service["keys"]
+    if key["path"] == r"Machine\System\Services\trustd"
+    for value in key["values"]
+}
+assert values["ImagePath"] == "/usr/sbin/trustd"
+assert values["Identity"] == "LocalService"
+assert values["ExecStartPre"] == ["/usr/libexec/trustd/prepare-store"]
+assert values["HookIdentity"] == "SYSTEM"
+assert values["Readiness"] == 0
+assert values["RuntimeDirectories"] == ["trustd"]
+assert values["RestartPolicy"] == 2
+assert values["ErrorControl"] == 0
+paths = {key["path"] for key in service["keys"]}
+assert r"Machine\System\Trust" in paths
+assert r"Machine\System\Trust\Certificates\Add" in paths
+assert r"Machine\System\Trust\Certificates\Distrust" in paths
+
+regman = (root / "usr/share/regman/trustd.regman").read_text()
+assert r"Machine\System\Trust" in regman
+assert "GenerateLinuxTrustFiles" in regman
+assert "ControlSecurity" in regman
+
+hook = (root / "usr/libexec/trustd/prepare-store").read_text()
+assert "#!/bin/sh" in hook
+assert "set -eu" in hook
+assert "mkdir -p \"$STORE\"" in hook
+assert "sd allow --replace --flags CI,OI" in hook
+assert "S-1-5-18:f" in hook and "S-1-5-32-544:f" in hook
+assert "S-1-1-0:rx" in hook
+assert "S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888" in hook
+assert '"$TRUSTD_SID:f"' in hook
+assert 'mkdir -p "$STORE/certs" "$STORE/certs.new"' in hook
+PY
+
+# Verify the stripped runtime objects and their build-ID-indexed companions.
+for record in \
+  "trustd:$PEKIT_OUT/usr/sbin/trustd" \
+  "trust:$PEKIT_OUT/usr/bin/trust"
+do
+  component=${record%%:*}
+  elf=${record#*:}
+  readelf -h "$elf" | grep -E 'Type:[[:space:]]+DYN' >/dev/null
+  readelf -lW "$elf" | grep 'GNU_RELRO' >/dev/null
+  readelf -lW "$elf" | grep -E 'GNU_STACK[[:space:]].*RW[[:space:]]' >/dev/null
+  readelf -dW "$elf" | grep 'BIND_NOW' >/dev/null
+  readelf -dW "$elf" | grep -E 'FLAGS_1.*PIE' >/dev/null
+  ! readelf -dW "$elf" | grep -E '(RPATH|RUNPATH|TEXTREL)' >/dev/null
+  ! readelf -SW "$elf" | grep '\.debug_info' >/dev/null
+  readelf -dW "$elf" | grep -F 'Shared library: [libpeios.so.0]' >/dev/null
+  build_id=$(readelf -n "$elf" | sed -n 's/^[[:space:]]*Build ID: //p' | head -1)
+  test -n "$build_id"
+  debug=$PEKIT_OUT/debug/$component/usr/lib/debug/.build-id/$(printf %s "$build_id" | cut -c1-2)/$(printf %s "$build_id" | cut -c3-).debug
+  test -s "$debug"
+  readelf -SW "$debug" | grep '\.debug_info' >/dev/null
+  test "$(readelf -n "$debug" | sed -n 's/^[[:space:]]*Build ID: //p' | head -1)" = "$build_id"
+  for forbidden in "$SRC" "$PEKIT_VENDOR_OUT" "$PEKIT_OUT_BASE" "$PEKIT_WORKSPACE_ROOT"; do
+    ! grep -aF "$forbidden" "$elf" "$debug" >/dev/null
+  done
+done
+'''
+
+[build.main.dependencies.peipkg]
+"dev.peios.build-essentials-rust" = ">= 1.0.0-9"
+"org.pkgconf.pkgconf"             = "*"
+"org.llvm.clang-devel"            = ">= 22, < 23"
+"org.python.python3"              = "*"
+"org.gnu.gzip"                    = "*"
+"dev.peios.libpeios-devel"        = "= 0.5.0-1"
+
+[build.main.dependencies.apt]
+dash         = "*"
+coreutils    = "*"
+findutils    = "*"
+grep         = "*"
+sed          = "*"
+cargo        = "*"
+rustc        = "*"
+gcc          = "*"
+binutils     = "*"
+debugedit    = "*"
+python3      = "*"
+libclang-dev = "*"
+pkgconf      = "*"
+gzip         = "*"
 
 [test]
-command = "cargo test --workspace"
+needs = ["vendor"]
+command = '''
+set -eu
+export CARGO_HOME=$PEKIT_OUT/cargo-home
+mkdir -p "$CARGO_HOME"
+cp "$PEKIT_VENDOR_OUT/cargo-config.toml" "$CARGO_HOME/config.toml"
+unset PEIOS_LIB_DIR PEIOS_INCLUDE PKM_UAPI
+test "$(pkg-config --modversion peios)" = 0.5.0
+export BINDGEN_EXTRA_CLANG_ARGS="-isystem $(gcc -print-file-name=include) ${BINDGEN_EXTRA_CLANG_ARGS:-}"
+cargo test --workspace --locked --offline
+dash -n libexec/prepare-store
+'''
+
+[test.dependencies.peipkg]
+"dev.peios.build-essentials-rust" = ">= 1.0.0-9"
+"org.pkgconf.pkgconf"             = "*"
+"org.llvm.clang-devel"            = ">= 22, < 23"
+"dev.peios.libpeios-devel"        = "= 0.5.0-1"
+
+[test.dependencies.apt]
+dash         = "*"
+coreutils    = "*"
+cargo        = "*"
+rustc        = "*"
+gcc          = "*"
+libclang-dev = "*"
+pkgconf      = "*"
 
 [clean]
 command = "cargo clean"

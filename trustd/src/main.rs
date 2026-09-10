@@ -22,9 +22,9 @@ use std::time::{Duration, Instant};
 
 use libtrust::{Health, Reply, Request, Root, SHARE_BUNDLE, STORE_DIR, Status};
 use peios::registry::Key;
+use trustd::log;
 use trustd::render;
 use trustd::store::{self, Composed};
-use trustd::log;
 
 /// How often to look at the shipped bundle. A package upgrade replaces it
 /// and nothing tells us; a stat every minute is cheaper than any mechanism
@@ -69,7 +69,11 @@ impl Trustd {
                 source: entry.source,
                 name: entry.name.clone(),
                 not_after: entry.parsed.not_after,
-                der: if with_der { entry.parsed.der.clone() } else { Vec::new() },
+                der: if with_der {
+                    entry.parsed.der.clone()
+                } else {
+                    Vec::new()
+                },
             })
             .collect()
     }
@@ -113,13 +117,14 @@ impl Trustd {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .ok();
-        let composed = match store::compose(&shipped, &self.config.additions, &self.config.distrust, now) {
-            Ok(c) => c,
-            Err(e) => {
-                self.degrade(e);
-                return;
-            }
-        };
+        let composed =
+            match store::compose(&shipped, &self.config.additions, &self.config.distrust, now) {
+                Ok(c) => c,
+                Err(e) => {
+                    self.degrade(e);
+                    return;
+                }
+            };
 
         let unchanged = composed.roots == self.composed.roots && self.health == Health::Ok;
         for warning in &composed.warnings {
@@ -167,7 +172,9 @@ impl Trustd {
                 // Stamping our own would drop trustd's access to the file
                 // it had just written.
                 if paths.is_empty() {
-                    log::info(format_args!("GenerateLinuxTrustFiles is 0; no files are rendered"));
+                    log::info(format_args!(
+                        "GenerateLinuxTrustFiles is 0; no files are rendered"
+                    ));
                 } else {
                     log::info(format_args!("rendered {}", paths.join(", ")));
                 }
@@ -229,7 +236,9 @@ impl Trustd {
 }
 
 fn notify_ready() {
-    let Ok(path) = std::env::var("NOTIFY_SOCKET") else { return };
+    let Ok(path) = std::env::var("NOTIFY_SOCKET") else {
+        return;
+    };
     match UnixDatagram::unbound() {
         Ok(s) => {
             if let Err(e) = s.send_to(b"READY=1", &path) {
@@ -241,6 +250,23 @@ fn notify_ready() {
 }
 
 fn main() -> ExitCode {
+    match std::env::args().nth(1).as_deref() {
+        Some("--version" | "-V" | "version") => {
+            println!("trustd {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Some("--help" | "-h" | "help") => {
+            eprintln!("usage: trustd");
+            return ExitCode::SUCCESS;
+        }
+        Some(argument) => {
+            eprintln!("trustd: unexpected argument: {argument}");
+            eprintln!("usage: trustd");
+            return ExitCode::from(64);
+        }
+        None => {}
+    }
+
     let listener = match control::listen() {
         Ok(l) => l,
         Err(e) => {
@@ -251,7 +277,9 @@ fn main() -> ExitCode {
     let mut watch: Option<Key> = match config::watch() {
         Ok(k) => Some(k),
         Err(e) => {
-            log::warn(format_args!("registry watch unavailable ({e}); configuration is read on a timer only"));
+            log::warn(format_args!(
+                "registry watch unavailable ({e}); configuration is read on a timer only"
+            ));
             None
         }
     };
@@ -274,7 +302,10 @@ fn main() -> ExitCode {
     if trustd.health == Health::Degraded {
         // Starting degraded is survivable — the previous boot's render may
         // still be there on an installed machine — but it must be loud.
-        log::error(format_args!("started with no usable store: {}", trustd.message.clone().unwrap_or_default()));
+        log::error(format_args!(
+            "started with no usable store: {}",
+            trustd.message.clone().unwrap_or_default()
+        ));
     }
     notify_ready();
 
@@ -282,17 +313,27 @@ fn main() -> ExitCode {
     loop {
         let mut fds: Vec<libc::pollfd> = Vec::new();
         fn push(fds: &mut Vec<libc::pollfd>, fd: i32) -> usize {
-            fds.push(libc::pollfd { fd, events: libc::POLLIN, revents: 0 });
+            fds.push(libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            });
             fds.len() - 1
         }
         push(&mut fds, listener.as_raw_fd());
         let watch_slot = watch.as_ref().map(|w| push(&mut fds, w.as_raw_fd()));
-        let client_slots: Vec<(u64, usize)> =
-            trustd.clients.iter().map(|(id, c)| (*id, push(&mut fds, c.stream.as_raw_fd()))).collect();
+        let client_slots: Vec<(u64, usize)> = trustd
+            .clients
+            .iter()
+            .map(|(id, c)| (*id, push(&mut fds, c.stream.as_raw_fd())))
+            .collect();
         // A subscriber that closes its end should not sit in the table until
         // the next change; poll it so the close is noticed.
-        let subscriber_slots: Vec<usize> =
-            trustd.subscribers.iter().map(|(s, _)| push(&mut fds, s.as_raw_fd())).collect();
+        let subscriber_slots: Vec<usize> = trustd
+            .subscribers
+            .iter()
+            .map(|(s, _)| push(&mut fds, s.as_raw_fd()))
+            .collect();
 
         let timeout = BUNDLE_POLL.as_millis() as i32;
         // SAFETY: `fds` is a live, exclusively borrowed array for the call.
@@ -333,7 +374,9 @@ fn main() -> ExitCode {
             if fds[*slot].revents == 0 {
                 continue;
             }
-            let Some(client) = trustd.clients.get_mut(id) else { continue };
+            let Some(client) = trustd.clients.get_mut(id) else {
+                continue;
+            };
             match client.read() {
                 control::Progress::Incomplete => {}
                 control::Progress::Closed => {
@@ -380,6 +423,8 @@ fn main() -> ExitCode {
             trustd.refresh(reason);
         }
 
-        trustd.clients.retain(|_, c| now.duration_since(c.since) < control::CLIENT_TIMEOUT);
+        trustd
+            .clients
+            .retain(|_, c| now.duration_since(c.since) < control::CLIENT_TIMEOUT);
     }
 }

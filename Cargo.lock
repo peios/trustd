@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "libtrust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "peios",
 ]
@@ -227,6 +227,7 @@ dependencies = [
 [[package]]
 name = "peios"
 version = "0.4.0"
+source = "git+https://github.com/peios/peios-rs.git?rev=f4309f78fbaa878a14429a5e07d778dba9ddfab7#f4309f78fbaa878a14429a5e07d778dba9ddfab7"
 dependencies = [
  "bitflags",
  "libc",
@@ -236,6 +237,7 @@ dependencies = [
 [[package]]
 name = "peios-sys"
 version = "0.3.0"
+source = "git+https://github.com/peios/peios-rs.git?rev=f4309f78fbaa878a14429a5e07d778dba9ddfab7#f4309f78fbaa878a14429a5e07d778dba9ddfab7"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -382,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "trust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "libtrust",
@@ -392,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "trustd"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "der",
  "libc",

@@ -142,7 +142,10 @@ pub struct Root {
 pub enum Request {
     /// The effective root set. `with_der` false is the listing form — a
     /// person wants subjects, a TLS library wants certificates.
-    Roots { with_der: bool, purpose: Option<String> },
+    Roots {
+        with_der: bool,
+        purpose: Option<String>,
+    },
     /// The set now, and a fresh one after every change, on this connection
     /// until the peer closes it.
     Subscribe { with_der: bool },
@@ -265,7 +268,11 @@ pub enum Reply {
     Ok,
     Error(String),
     /// One chunk of the root set. `more` is true when another follows.
-    Roots { generation: u64, roots: Vec<Root>, more: bool },
+    Roots {
+        generation: u64,
+        roots: Vec<Root>,
+        more: bool,
+    },
     Status(Status),
 }
 
@@ -277,9 +284,17 @@ impl Reply {
                 w.write_map(1).write_str("ok").write_bool(true);
             }
             Reply::Error(message) => {
-                w.write_map(2).write_str("ok").write_bool(false).write_str("error").write_str(message);
+                w.write_map(2)
+                    .write_str("ok")
+                    .write_bool(false)
+                    .write_str("error")
+                    .write_str(message);
             }
-            Reply::Roots { generation, roots, more } => {
+            Reply::Roots {
+                generation,
+                roots,
+                more,
+            } => {
                 w.write_map(5).write_str("ok").write_bool(true);
                 w.write_str("kind").write_str("roots");
                 w.write_str("generation").write_uint(*generation);
@@ -307,7 +322,8 @@ impl Reply {
                 w.write_str("distrusted").write_uint(s.distrusted);
                 w.write_str("skipped").write_uint(s.skipped);
                 w.write_str("effective").write_uint(s.effective);
-                w.write_str("compat_mode").write_uint(u64::from(s.compat_mode));
+                w.write_str("compat_mode")
+                    .write_uint(u64::from(s.compat_mode));
                 write_str_list(&mut w, "rendered", &s.rendered);
             }
         }
@@ -354,8 +370,14 @@ impl Reply {
             Ok(())
         })?;
         match (ok, kind.as_deref()) {
-            (Some(false), _) => Ok(Reply::Error(error.unwrap_or_else(|| "unspecified error".to_owned()))),
-            (Some(true), Some("roots")) => Ok(Reply::Roots { generation, roots, more }),
+            (Some(false), _) => Ok(Reply::Error(
+                error.unwrap_or_else(|| "unspecified error".to_owned()),
+            )),
+            (Some(true), Some("roots")) => Ok(Reply::Roots {
+                generation,
+                roots,
+                more,
+            }),
             (Some(true), Some("status")) => Ok(Reply::Status(status)),
             (Some(true), _) => Ok(Reply::Ok),
             (None, _) => Err(WireError::Missing("ok")),
@@ -531,7 +553,11 @@ pub fn roots_of(replies: Vec<Reply>) -> Result<(u64, Vec<Root>), String> {
     let mut roots = Vec::new();
     for reply in replies {
         match reply {
-            Reply::Roots { generation: g, roots: mut batch, .. } => {
+            Reply::Roots {
+                generation: g,
+                roots: mut batch,
+                ..
+            } => {
                 generation = g;
                 roots.append(&mut batch);
             }
@@ -551,7 +577,11 @@ mod tests {
             fingerprint: format!("{n:064x}"),
             subject: format!("CN=Test Root {n}, O=Peios"),
             purposes: vec!["ServerAuth".into()],
-            source: if n % 2 == 0 { Source::Shipped } else { Source::Added },
+            source: if n % 2 == 0 {
+                Source::Shipped
+            } else {
+                Source::Added
+            },
             name: (n % 2 == 1).then(|| format!("root-{n}")),
             not_after: 1_900_000_000,
             der: vec![0x30, 0x82, n, 0x00],
@@ -561,8 +591,14 @@ mod tests {
     #[test]
     fn requests_round_trip() {
         for req in [
-            Request::Roots { with_der: true, purpose: None },
-            Request::Roots { with_der: false, purpose: Some("ServerAuth".into()) },
+            Request::Roots {
+                with_der: true,
+                purpose: None,
+            },
+            Request::Roots {
+                with_der: false,
+                purpose: Some("ServerAuth".into()),
+            },
             Request::Subscribe { with_der: true },
             Request::Status,
             Request::Reload,
@@ -575,9 +611,17 @@ mod tests {
 
     #[test]
     fn a_roots_chunk_round_trips() {
-        let reply = Reply::Roots { generation: 7, roots: (0..3).map(root).collect(), more: true };
+        let reply = Reply::Roots {
+            generation: 7,
+            roots: (0..3).map(root).collect(),
+            more: true,
+        };
         assert_eq!(Reply::decode(&reply.encode()).unwrap(), reply);
-        let empty = Reply::Roots { generation: 0, roots: vec![], more: false };
+        let empty = Reply::Roots {
+            generation: 0,
+            roots: vec![],
+            more: false,
+        };
         assert_eq!(Reply::decode(&empty.encode()).unwrap(), empty);
     }
 
@@ -606,9 +650,17 @@ mod tests {
         // A real root is one to two kilobytes; make them larger than that
         // and confirm a full chunk still frames.
         let big: Vec<Root> = (0..ROOTS_PER_CHUNK as u8)
-            .map(|n| Root { der: vec![0x41; 2048], ..root(n) })
+            .map(|n| Root {
+                der: vec![0x41; 2048],
+                ..root(n)
+            })
             .collect();
-        let bytes = Reply::Roots { generation: 1, roots: big, more: true }.encode();
+        let bytes = Reply::Roots {
+            generation: 1,
+            roots: big,
+            more: true,
+        }
+        .encode();
         assert!(bytes.len() <= MAX_MESSAGE_BYTES, "{} bytes", bytes.len());
         let mut buf = Vec::new();
         send(&mut buf, &bytes).unwrap();
@@ -618,23 +670,48 @@ mod tests {
     #[test]
     fn chunks_reassemble_and_an_error_surfaces() {
         let replies = vec![
-            Reply::Roots { generation: 9, roots: vec![root(1), root(2)], more: true },
-            Reply::Roots { generation: 9, roots: vec![root(3)], more: false },
+            Reply::Roots {
+                generation: 9,
+                roots: vec![root(1), root(2)],
+                more: true,
+            },
+            Reply::Roots {
+                generation: 9,
+                roots: vec![root(3)],
+                more: false,
+            },
         ];
         let (generation, roots) = roots_of(replies).unwrap();
         assert_eq!(generation, 9);
         assert_eq!(roots.len(), 3);
-        assert_eq!(roots_of(vec![Reply::Error("denied".into())]), Err("denied".into()));
+        assert_eq!(
+            roots_of(vec![Reply::Error("denied".into())]),
+            Err("denied".into())
+        );
     }
 
     #[test]
     fn a_duplicate_key_is_refused_and_an_unknown_one_ignored() {
         let mut w = Writer::new();
-        w.write_map(2).write_str("query").write_str("status").write_str("query").write_str("status");
-        assert!(matches!(Request::decode(&w.to_bytes().unwrap()), Err(WireError::Duplicate(_))));
+        w.write_map(2)
+            .write_str("query")
+            .write_str("status")
+            .write_str("query")
+            .write_str("status");
+        assert!(matches!(
+            Request::decode(&w.to_bytes().unwrap()),
+            Err(WireError::Duplicate(_))
+        ));
         let mut w = Writer::new();
-        w.write_map(2).write_str("extra").write_uint(3).write_str("query").write_str("status");
-        assert_eq!(Request::decode(&w.to_bytes().unwrap()).unwrap(), Request::Status);
+        w.write_map(2)
+            .write_str("extra")
+            .write_uint(3)
+            .write_str("query")
+            .write_str("status");
+        assert_eq!(
+            Request::decode(&w.to_bytes().unwrap()).unwrap(),
+            Request::Status
+        );
     }
 
     #[test]
@@ -655,6 +732,9 @@ mod tests {
     fn framing_refuses_oversize() {
         let big = [0xffu8, 0xff, 0xff, 0x00];
         assert!(matches!(recv(&mut &big[..]), Err(WireError::TooLarge(_))));
-        assert!(matches!(send(&mut Vec::new(), &vec![0u8; MAX_MESSAGE_BYTES + 1]), Err(WireError::TooLarge(_))));
+        assert!(matches!(
+            send(&mut Vec::new(), &vec![0u8; MAX_MESSAGE_BYTES + 1]),
+            Err(WireError::TooLarge(_))
+        ));
     }
 }
