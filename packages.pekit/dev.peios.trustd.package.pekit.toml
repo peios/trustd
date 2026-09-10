@@ -6,11 +6,7 @@ side_effects = ["man-db"]
 name        = "dev.peios.trustd"
 description = "Peios machine trust-store composition and query service"
 
-[provides]
-trustd = "{{version}}-1"
 
-[replaces]
-trustd = "<= 0.1.0-10"
 
 [dependencies]
 "dev.peios.libpeios"   = ">= 0.5.0"
