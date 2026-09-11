@@ -107,9 +107,7 @@ if versions != [expected]:
 
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$PEKIT_WORKSPACE_ROOT=$DEBUG_PREFIX/.workspace --remap-path-prefix=$PEKIT_OUT_BASE=$DEBUG_PREFIX/.build --remap-path-prefix=$SRC=$DEBUG_PREFIX --remap-path-prefix=$PEKIT_VENDOR_OUT/vendor=$DEBUG_PREFIX/vendor"
 
-# The test build exercises the complete workspace. Two independent release
-# target trees must then produce byte-identical unstripped binaries.
-cargo test --release --workspace --locked --offline --target-dir "$PEKIT_OUT/target-test"
+# Two independent release target trees must produce byte-identical unstripped binaries.
 for target in target-a target-b; do
   CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO=off \
     cargo build --release --workspace --locked --offline \
@@ -189,6 +187,49 @@ done
 rm -f "$PEKIT_OUT/.debug-sources"
 test -n "$(find "$DEBUG_ROOT" -type f -print -quit)"
 
+'''
+
+[build.main.dependencies.peipkg]
+"dev.peios.build-essentials-rust" = ">= 1.0.0-9"
+"org.pkgconf.pkgconf"             = "*"
+"org.llvm.clang-devel"            = ">= 22, < 23"
+"org.python.python3"              = "*"
+"org.gnu.gzip"                    = "*"
+"dev.peios.libpeios-devel"        = "= 0.5.0-1"
+
+[build.main.dependencies.apt]
+dash         = "*"
+coreutils    = "*"
+findutils    = "*"
+grep         = "*"
+sed          = "*"
+cargo        = "*"
+rustc        = "*"
+gcc          = "*"
+binutils     = "*"
+debugedit    = "*"
+python3      = "*"
+libclang-dev = "*"
+pkgconf      = "*"
+gzip         = "*"
+
+[test]
+gate = true
+needs = ["main"]
+command = '''
+set -eu
+export CARGO_HOME=$PEKIT_OUT/cargo-home
+mkdir -p "$CARGO_HOME"
+cp "$PEKIT_VENDOR_OUT/cargo-config.toml" "$CARGO_HOME/config.toml"
+unset PEIOS_LIB_DIR PEIOS_INCLUDE PKM_UAPI
+test "$(pkg-config --modversion peios)" = 0.5.0
+export BINDGEN_EXTRA_CLANG_ARGS="-isystem $(gcc -print-file-name=include) ${BINDGEN_EXTRA_CLANG_ARGS:-}"
+cargo test --release --workspace --locked --offline --target-dir "$PEKIT_OUT/target-test"
+dash -n libexec/prepare-store
+
+# Validate the exact staged package output produced by build.main.
+SRC=$(pwd -P)
+PEKIT_OUT="$PEKIT_MAIN_OUT"
 # Installed command, manual, service, registry and privileged-hook contracts.
 test "$("$PEKIT_OUT/usr/bin/trust" --version)" = "trust $PEKIT_VERSION"
 test "$("$PEKIT_OUT/usr/sbin/trustd" --version)" = "trustd $PEKIT_VERSION"
@@ -265,7 +306,7 @@ do
 done
 '''
 
-[build.main.dependencies.peipkg]
+[test.dependencies.peipkg]
 "dev.peios.build-essentials-rust" = ">= 1.0.0-9"
 "org.pkgconf.pkgconf"             = "*"
 "org.llvm.clang-devel"            = ">= 22, < 23"
@@ -273,7 +314,7 @@ done
 "org.gnu.gzip"                    = "*"
 "dev.peios.libpeios-devel"        = "= 0.5.0-1"
 
-[build.main.dependencies.apt]
+[test.dependencies.apt]
 dash         = "*"
 coreutils    = "*"
 findutils    = "*"
@@ -288,35 +329,6 @@ python3      = "*"
 libclang-dev = "*"
 pkgconf      = "*"
 gzip         = "*"
-
-[test]
-needs = ["vendor"]
-command = '''
-set -eu
-export CARGO_HOME=$PEKIT_OUT/cargo-home
-mkdir -p "$CARGO_HOME"
-cp "$PEKIT_VENDOR_OUT/cargo-config.toml" "$CARGO_HOME/config.toml"
-unset PEIOS_LIB_DIR PEIOS_INCLUDE PKM_UAPI
-test "$(pkg-config --modversion peios)" = 0.5.0
-export BINDGEN_EXTRA_CLANG_ARGS="-isystem $(gcc -print-file-name=include) ${BINDGEN_EXTRA_CLANG_ARGS:-}"
-cargo test --workspace --locked --offline
-dash -n libexec/prepare-store
-'''
-
-[test.dependencies.peipkg]
-"dev.peios.build-essentials-rust" = ">= 1.0.0-9"
-"org.pkgconf.pkgconf"             = "*"
-"org.llvm.clang-devel"            = ">= 22, < 23"
-"dev.peios.libpeios-devel"        = "= 0.5.0-1"
-
-[test.dependencies.apt]
-dash         = "*"
-coreutils    = "*"
-cargo        = "*"
-rustc        = "*"
-gcc          = "*"
-libclang-dev = "*"
-pkgconf      = "*"
 
 [clean]
 command = "cargo clean"

@@ -13,7 +13,7 @@ description = "Peios machine trust-store composition and query service"
 "org.gnu.glibc"        = "*"
 "org.gnu.gcc-libgcc"   = "*"
 "dev.peios.peiosutils" = "*"
-ca-certificates         = "*"
+"org.mozilla.ca-certificates" = "*"
 sh                      = "*"
 
 [files]
