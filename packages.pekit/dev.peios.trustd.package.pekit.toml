@@ -5,6 +5,9 @@ side_effects = ["man-db"]
 [package]
 name        = "dev.peios.trustd"
 description = "Peios machine trust-store composition and query service"
+# The crate closure trustd links; build.main's collect-rust-licences --check
+# holds this to what those crates declare.
+license     = "((MIT OR Apache-2.0) AND Unicode-3.0) AND Apache-2.0 AND (Apache-2.0 OR MIT) AND BSD-3-Clause AND ISC AND MIT AND (MIT OR Unlicense)"
 
 
 
@@ -18,7 +21,7 @@ sh                      = "*"
 
 [files]
 "@source:LICENSE"                         = "usr/share/licenses/dev.peios.trustd/LICENSE"
-":licenses/**"                            = "usr/share/licenses/dev.peios.trustd/third-party"
+":licenses/trustd/**"                     ="usr/share/licenses/dev.peios.trustd/third-party"
 ":usr/sbin/trustd"                        = "usr/sbin/trustd"
 ":usr/libexec/trustd/prepare-store"       = "usr/libexec/trustd/prepare-store"
 ":usr/share/regim/trustd-service.reg"     = "usr/share/regim/trustd-service.reg"

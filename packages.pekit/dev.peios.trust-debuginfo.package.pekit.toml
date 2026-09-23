@@ -1,11 +1,13 @@
 [package]
 name        = "dev.peios.trust-debuginfo"
 description = "Debugging symbols for the Peios machine-trust client"
+# The same crate closure as trust; checked by build.main.
+license     = "((MIT OR Apache-2.0) AND Unicode-3.0) AND Apache-2.0 AND (Apache-2.0 OR MIT) AND BSD-3-Clause AND ISC AND MIT AND (MIT OR Unlicense)"
 
 [dependencies]
 "dev.peios.trust" = "= {{release}}"
 
 [files]
 "@source:LICENSE"                 = "usr/share/licenses/dev.peios.trust-debuginfo/LICENSE"
-":licenses/**"                    = "usr/share/licenses/dev.peios.trust-debuginfo/third-party"
+":licenses/trust/**"              ="usr/share/licenses/dev.peios.trust-debuginfo/third-party"
 ":debug/trust/usr/lib/debug/**"   = "usr/lib/debug"
