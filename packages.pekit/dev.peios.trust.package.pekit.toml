@@ -6,6 +6,9 @@ side_effects = ["man-db"]
 [package]
 name        = "dev.peios.trust"
 description = "Operator command for the Peios machine trust store"
+# The crate closure trust links; build.main's collect-rust-licences --check
+# holds this to what those crates declare.
+license     = "((MIT OR Apache-2.0) AND Unicode-3.0) AND Apache-2.0 AND (Apache-2.0 OR MIT) AND BSD-3-Clause AND ISC AND MIT AND (MIT OR Unlicense)"
 
 
 
@@ -16,6 +19,6 @@ description = "Operator command for the Peios machine trust store"
 
 [files]
 "@source:LICENSE"                    = "usr/share/licenses/dev.peios.trust/LICENSE"
-":licenses/**"                       = "usr/share/licenses/dev.peios.trust/third-party"
+":licenses/trust/**"                 ="usr/share/licenses/dev.peios.trust/third-party"
 ":usr/bin/trust"                     = "usr/bin/trust"
 ":usr/share/man/man1/trust.1.gz"     = "usr/share/man/man1/trust.1.gz"

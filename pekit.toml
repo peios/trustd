@@ -121,11 +121,39 @@ install -m 0644 "$SRC/trustd.regman" "$PEKIT_OUT/usr/share/regman/trustd.regman"
 gzip -n -9 -c "$SRC/man/trust.1" > "$PEKIT_OUT/usr/share/man/man1/trust.1.gz"
 gzip -n -9 -c "$SRC/man/trustd.8" > "$PEKIT_OUT/usr/share/man/man8/trustd.8.gz"
 
-# Preserve an auditable exact dependency table and every upstream notice.
-python3 "$SRC/tools/collect-rust-metadata.py" --licence-root "$PEKIT_OUT/licenses"
-grep -F "bindgen	0.70.1	BSD-3-Clause	" "$PEKIT_OUT/licenses/crate-licenses.tsv" >/dev/null
-grep -F "libloading	0.8.9	ISC	" "$PEKIT_OUT/licenses/crate-licenses.tsv" >/dev/null
-grep -F "unicode-ident	1.0.24	(MIT OR Apache-2.0) AND Unicode-3.0	" "$PEKIT_OUT/licenses/crate-licenses.tsv" >/dev/null
+# Each binary links its own crate closure, so each package ships that
+# closure's notices and declares its conjunction of licences; --check holds
+# every package definition to it (PEI-1163). The debug sources cover both
+# closures. peios-rs carries no package-local notice; ship the reviewed
+# notice of that same pinned source.
+LICENSE_ROOT=$PEKIT_OUT/licenses
+collect_licences() {
+  out=$1
+  roots=$2
+  shift 2
+  root_args=
+  for root in $roots; do root_args="$root_args --root $root"; done
+  for definition in "$@"; do
+    # shellcheck disable=SC2086 # crate names are single words
+    /usr/libexec/peios-packaging/collect-rust-licences \
+      --licence-root "$LICENSE_ROOT/$out" $root_args \
+      --notice "git+https://github.com/peios/peios-rs.git=third-party/peios-rs-LICENSE" \
+      --check "packages.pekit/$definition.package.pekit.toml"
+  done
+  test -s "$LICENSE_ROOT/$out/crate-licenses.tsv"
+}
+collect_licences trustd trustd dev.peios.trustd dev.peios.trustd-debuginfo
+collect_licences trust trust dev.peios.trust dev.peios.trust-debuginfo
+collect_licences debugsource "trustd trust" dev.peios.trustd-debugsource
+grep -F "bindgen	0.70.1	BSD-3-Clause	" "$LICENSE_ROOT/trustd/crate-licenses.tsv" >/dev/null
+grep -F "libloading	0.8.9	ISC	" "$LICENSE_ROOT/trustd/crate-licenses.tsv" >/dev/null
+grep -F "unicode-ident	1.0.24	(MIT OR Apache-2.0) AND Unicode-3.0	" "$LICENSE_ROOT/trustd/crate-licenses.tsv" >/dev/null
+
+# The debug split stays local rather than using
+# /usr/libexec/peios-packaging/split-debug: symbols go to per-component
+# debuginfo trees, and the vendored crates' sources live in
+# $PEKIT_VENDOR_OUT, outside any single build root split-debug copies
+# sources from; the loop below resolves them there.
 
 : > "$PEKIT_OUT/.debug-sources"
 split_debug() {
@@ -188,6 +216,7 @@ test -n "$(find "$DEBUG_ROOT" -type f -print -quit)"
 "org.python.python3"              = "*"
 "org.gnu.gzip"                    = "*"
 "dev.peios.libpeios-devel"        = ">= 0.5.0"
+"dev.peios.packaging-tools"       = "*"
 
 [test]
 gate = true
