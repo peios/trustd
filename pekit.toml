@@ -51,12 +51,6 @@ if external_paths:
 "dev.peios.build-essentials-rust" = ">= 1.0.0-1"
 "org.python.python3"              = "*"
 
-[build.vendor.dependencies.apt]
-cargo     = "*"
-rustc     = "*"
-python3   = "*"
-findutils = "*"
-
 [build.main]
 needs = ["vendor"]
 command = '''
@@ -204,27 +198,6 @@ test -n "$(find "$DEBUG_ROOT" -type f -print -quit)"
 "org.gnu.gzip"                    = "*"
 "dev.peios.libpeios-devel"        = "= 0.5.0-1"
 
-[build.main.dependencies.apt]
-# The libpeios SDK and PKM UAPI headers come from the signed catalogue
-# (pkgs/_debroot_); Debian has no Peios ABI packages.
-"dev.peios.libpeios"       = "= 0.5.0-1"
-"dev.peios.libpeios-devel" = "= 0.5.0-1"
-"dev.peios.kernel-headers" = "*"
-dash         = "*"
-coreutils    = "*"
-findutils    = "*"
-grep         = "*"
-sed          = "*"
-cargo        = "*"
-rustc        = "*"
-gcc          = "*"
-binutils     = "*"
-debugedit    = "*"
-python3      = "*"
-libclang-dev = "*"
-pkgconf      = "*"
-gzip         = "*"
-
 [test]
 gate = true
 needs = ["main", "vendor"]
@@ -325,25 +298,6 @@ done
 "org.python.python3"              = "*"
 "org.gnu.gzip"                    = "*"
 "dev.peios.libpeios-devel"        = "= 0.5.0-1"
-
-[test.dependencies.apt]
-"dev.peios.libpeios"       = "= 0.5.0-1"
-"dev.peios.libpeios-devel" = "= 0.5.0-1"
-"dev.peios.kernel-headers" = "*"
-dash         = "*"
-coreutils    = "*"
-findutils    = "*"
-grep         = "*"
-sed          = "*"
-cargo        = "*"
-rustc        = "*"
-gcc          = "*"
-binutils     = "*"
-debugedit    = "*"
-python3      = "*"
-libclang-dev = "*"
-pkgconf      = "*"
-gzip         = "*"
 
 [clean]
 command = "cargo clean"
