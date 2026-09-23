@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "libtrust"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "peios",
 ]
@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "trust"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "libc",
  "libtrust",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "trustd"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "der",
  "libc",

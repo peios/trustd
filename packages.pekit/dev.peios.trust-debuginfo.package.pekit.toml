@@ -3,7 +3,7 @@ name        = "dev.peios.trust-debuginfo"
 description = "Debugging symbols for the Peios machine-trust client"
 
 [dependencies]
-"dev.peios.trust" = "= {{version}}-1"
+"dev.peios.trust" = "= {{release}}"
 
 [files]
 "@source:LICENSE"                 = "usr/share/licenses/dev.peios.trust-debuginfo/LICENSE"
