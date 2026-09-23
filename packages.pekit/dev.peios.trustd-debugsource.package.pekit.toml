@@ -4,8 +4,8 @@ architecture = "x86_64"
 description  = "Debug sources for the Peios trust service and client"
 
 [dependencies]
-"dev.peios.trustd-debuginfo" = "= {{version}}-1"
-"dev.peios.trust-debuginfo"  = "= {{version}}-1"
+"dev.peios.trustd-debuginfo" = "= {{release}}"
+"dev.peios.trust-debuginfo"  = "= {{release}}"
 
 [files]
 "@source:LICENSE"   = "usr/share/licenses/dev.peios.trustd-debugsource/LICENSE"
