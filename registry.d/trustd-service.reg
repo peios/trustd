@@ -2,17 +2,13 @@
   "_comment": [
     "The trustd service definition, and the trust store's own keys.",
     "",
-    "Identity is LocalService. trustd needs no privilege at all: it reads a",
+    "Identity is Service (the daemon's own virtual account). trustd needs no privilege at all: it reads a",
     "file the ca-certificates package ships, reads the registry, and writes",
     "/system/retc/ssl. Nothing it holds is secret -- the root set is public,",
     "which is also why its socket is open to everyone. Private keys are",
     "deliberately not trustd's: a key holder is a signing oracle under",
     "compromise and wants the opposite security posture, so machine identity",
     "belongs to a future key service, not here.",
-    "",
-    "(peinit today materialises every non-SYSTEM identity as a SYSTEM token",
-    "carrying the service SID -- PEI-329. The intent is recorded here so",
-    "that when service logon exists nothing about trustd has to change.)",
     "",
     "ExecStartPre runs prepare-store as SYSTEM (HookIdentity) to create",
     "/system/retc/ssl and hand it to trustd's service SID. peinit provisions",
@@ -62,7 +58,7 @@
         {
           "name": "Identity",
           "type": "sz",
-          "data": "LocalService"
+          "data": "Service"
         },
         {
           "name": "ExecStartPre",
