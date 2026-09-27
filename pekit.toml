@@ -258,7 +258,7 @@ values = {
     for value in key["values"]
 }
 assert values["ImagePath"] == "/usr/sbin/trustd"
-assert values["Identity"] == "LocalService"
+assert values["Identity"] == "Service"
 assert values["ExecStartPre"] == ["/usr/libexec/trustd/prepare-store"]
 assert values["HookIdentity"] == "SYSTEM"
 assert values["Readiness"] == 0
