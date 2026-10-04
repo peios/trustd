@@ -24,12 +24,18 @@
 //! The socket is the trust store; the rendered files are a compatibility
 //! artifact of it (`GenerateLinuxTrustFiles`).
 //!
-//! This crate is inert: types and a codec, nothing that can act.
+//! This crate is inert: types, a codec and the control object's default
+//! descriptor, nothing that can act. What changes the trust store — the
+//! registry writes `trust` and Security Policy make — is the `trust`
+//! crate's library.
 
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 
 use peios::msgpack::{Reader, Type, Writer};
+use peios::security::{
+    AccessMask, AceFlags, AclBuilder, GenericMapping, SdBuilder, SecurityDescriptor, Sid, WellKnown,
+};
 
 /// trustd's runtime directory. peinit creates it (`RuntimeDirectories`) and
 /// trustd stamps its own descriptor on it.
@@ -84,6 +90,44 @@ pub const CERTS_DIR: &str = "/system/retc/ssl/certs";
 pub const TRUST_QUERY: u32 = 0x0000_0001;
 pub const TRUST_CONTROL: u32 = 0x0000_0002;
 pub const TRUST_ALL_ACCESS: u32 = TRUST_QUERY | TRUST_CONTROL | 0x000F_0000;
+
+/// The control object's descriptor when `ControlSecurity` is absent: SYSTEM
+/// and Administrators have every right, Everyone may query. trustd checks
+/// against it, and a window asks it whether to offer `reload` at all, so
+/// both read it from here.
+pub fn default_control_security() -> SecurityDescriptor {
+    let system = Sid::well_known(WellKnown::System);
+    let administrators = Sid::well_known(WellKnown::Administrators);
+    let everyone = Sid::well_known(WellKnown::Everyone);
+    AclBuilder::new()
+        .allow(system.as_ref(), TRUST_ALL_ACCESS, AceFlags::empty())
+        .allow(administrators.as_ref(), TRUST_ALL_ACCESS, AceFlags::empty())
+        .allow(
+            everyone.as_ref(),
+            TRUST_QUERY | AccessMask::READ_CONTROL.bits(),
+            AceFlags::empty(),
+        )
+        .build()
+        .and_then(|dacl| {
+            SdBuilder::new()
+                .owner(system.as_ref())
+                .group(system.as_ref())
+                .dacl(&dacl)
+                .build()
+        })
+        .expect("the compiled default descriptor builds")
+}
+
+/// What the generic rights mean on the control object.
+pub fn control_mapping() -> GenericMapping {
+    let rc = AccessMask::READ_CONTROL.bits();
+    GenericMapping::new(
+        TRUST_QUERY | rc,
+        TRUST_CONTROL | rc,
+        TRUST_QUERY,
+        TRUST_ALL_ACCESS,
+    )
+}
 
 /// Ceiling on one control message, payload only.
 pub const MAX_MESSAGE_BYTES: usize = 65_536;

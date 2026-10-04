@@ -12,389 +12,118 @@
 //! trust reload                    recompose now
 //! ```
 //!
-//! It reads over trustd's socket and writes to the registry, and the split
-//! is deliberate. Only trustd knows the *effective* set — the shipped roots
-//! are package data, not registry entries, so a listing read from the
-//! registry would show the handful of local decisions and none of the
-//! hundred and fifty roots actually in force. Writes go the other way: to
-//! the registry, exactly as `reg` would write them, so the key's own
-//! descriptor is the only thing that decides who may change what this
-//! machine trusts. There is no second permission model here to drift out of
-//! step with that one.
+//! What each verb does is the `trust` library's, which Security Policy
+//! shares; this is how a terminal asks for it and what it prints.
 
 use std::io::Read;
-use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 
-use libtrust::{
-    ADD_KEY, CERTIFICATE_VALUE, CERTIFICATES_KEY, DISTRUST_KEY, PURPOSES_VALUE, Reply, Request,
-    Root, SOCKET_PATH, Source,
-};
-use peios::registry::{CreateFlags, Key, KeyAccess, ValueType};
-use trustd::cert;
-use trustd::store::normalise_fingerprint;
+use libtrust::{Root, Source};
+use trust::{Error, cert, normalise_fingerprint};
 
-const ACCESS: KeyAccess = KeyAccess::QUERY_VALUE
-    .union(KeyAccess::SET_VALUE)
-    .union(KeyAccess::CREATE_SUB_KEY)
-    .union(KeyAccess::ENUMERATE_SUB_KEYS);
-
-// ------------------------------------------------------------- the socket ---
-
-fn call(request: &Request) -> Result<Vec<Reply>, String> {
-    let mut stream = UnixStream::connect(SOCKET_PATH)
-        .map_err(|e| format!("trustd is not reachable at {SOCKET_PATH}: {e}"))?;
-    libtrust::call(&mut stream, request).map_err(|e| e.to_string())
-}
-
-fn roots(with_der: bool, purpose: Option<String>) -> Result<Vec<Root>, String> {
-    libtrust::roots_of(call(&Request::Roots { with_der, purpose })?).map(|(_, roots)| roots)
-}
-
-// ------------------------------------------------------------ the registry ---
-
-fn open_or_create(path: &str) -> Result<Key, String> {
-    Key::create(None, path, ACCESS, CreateFlags::empty(), None, None)
-        .map(|(k, _)| k)
-        .map_err(|e| describe_registry_error(path, e))
-}
-
-fn open_or_create_under(parent: &Key, name: &str) -> Result<Key, String> {
-    Key::create(Some(parent), name, ACCESS, CreateFlags::empty(), None, None)
-        .map(|(k, _)| k)
-        .map_err(|e| describe_registry_error(name, e))
-}
-
-/// A denied registry write is the expected failure for a person who may not
-/// change the machine's trust, so it should say so rather than print an
-/// error number.
-fn describe_registry_error(path: &str, error: peios::Error) -> String {
-    if error.raw_os_error() == Some(libc::EACCES) || error.raw_os_error() == Some(libc::EPERM) {
-        format!(
-            "not permitted to change {path} — changing what this machine trusts is governed by that key's descriptor"
-        )
-    } else {
-        format!("{path}: {error}")
+/// What a refused step exits with: 2 for "not there", so a script can tell
+/// "this machine does not trust that CA" from "I could not find out".
+fn failed(error: Error) -> ExitCode {
+    eprintln!("trust: {error}");
+    match error {
+        Error::NotFound(_) => ExitCode::from(2),
+        _ => ExitCode::FAILURE,
     }
 }
 
-/// `Machine\System\Trust\Certificates\<Add|Distrust>`, created if absent.
-fn certificates(which: &str) -> Result<Key, String> {
-    let certificates = open_or_create(CERTIFICATES_KEY)?;
-    open_or_create_under(&certificates, which)
-}
-
-// ------------------------------------------------------------------ verbs ---
-
-fn read_input(path: &str) -> Result<Vec<u8>, String> {
-    let text = if path == "-" {
+fn read_input(path: &str) -> Result<Vec<u8>, Error> {
+    let bytes = if path == "-" {
         let mut buffer = Vec::new();
         std::io::stdin()
             .read_to_end(&mut buffer)
-            .map_err(|e| format!("stdin: {e}"))?;
+            .map_err(|e| Error::Failed(format!("stdin: {e}")))?;
         buffer
     } else {
-        std::fs::read(path).map_err(|e| format!("{path}: {e}"))?
+        std::fs::read(path).map_err(|e| Error::Failed(format!("{path}: {e}")))?
     };
-    // PEM if it looks like it, DER otherwise.
-    if let Ok(as_text) = std::str::from_utf8(&text) {
-        let certificates = cert::from_pem(as_text);
-        if certificates.len() > 1 {
-            return Err(format!(
-                "{path} holds {} certificates; add them one at a time",
-                certificates.len()
-            ));
-        }
-        if let Some(der) = certificates.into_iter().next() {
-            return Ok(der);
-        }
-    }
-    Ok(text)
+    trust::certificate(&bytes, path)
 }
 
 fn add(name: &str, path: &str, purposes: &[String]) -> ExitCode {
-    if name.is_empty() || name.contains('\\') || name.contains('/') {
+    if !trust::usable_name(name) {
         eprintln!("trust: {name:?} is not a usable name");
         return ExitCode::FAILURE;
     }
     let der = match read_input(path) {
         Ok(der) => der,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return failed(e),
     };
-    // Validate here as well as in trustd, so a mistake is reported now
-    // rather than discovered in a log. trustd re-validates regardless: it
-    // never trusts the writer.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .ok();
-    let parsed = match cert::parse(&der, now) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("trust: {path} is {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let add = match certificates(ADD_KEY).and_then(|add| open_or_create_under(&add, name)) {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    if !purposes.is_empty() {
-        let mut data = Vec::new();
-        for purpose in purposes {
-            data.extend_from_slice(purpose.as_bytes());
-            data.push(0);
-        }
-        data.push(0);
-        if let Err(e) = add
-            .set_value(PURPOSES_VALUE.as_bytes(), ValueType::MULTI_SZ, &data)
-            .call()
-        {
-            eprintln!("trust: could not set {PURPOSES_VALUE}: {e}");
-            return ExitCode::FAILURE;
-        }
-    }
-    // The certificate goes last: until it exists the entry is incomplete,
-    // and trustd skips incomplete entries rather than acting on half of one.
-    if let Err(e) = add
-        .set_value(CERTIFICATE_VALUE.as_bytes(), ValueType::BINARY, &der)
-        .call()
-    {
-        eprintln!("trust: could not set {CERTIFICATE_VALUE}: {e}");
+    if let Err(e) = trust::vet(&der) {
+        eprintln!("trust: {path} is {e}");
         return ExitCode::FAILURE;
     }
-    println!("added {name}");
-    println!("  {}", parsed.subject);
-    println!("  SHA-256 {}", parsed.fingerprint);
-    if !purposes.is_empty() {
-        println!("  for {}", purposes.join(", "));
+    match trust::add(name, &der, purposes) {
+        Ok(parsed) => {
+            println!("added {name}");
+            println!("  {}", parsed.subject);
+            println!("  SHA-256 {}", parsed.fingerprint);
+            if !purposes.is_empty() {
+                println!("  for {}", purposes.join(", "));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => failed(e),
     }
-    ExitCode::SUCCESS
 }
 
 fn remove(name: &str) -> ExitCode {
-    let add = match certificates(ADD_KEY) {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let entry = match Key::open(
-        Some(&add),
-        name,
-        KeyAccess::DELETE,
-        peios::registry::OpenFlags::empty(),
-    ) {
-        Ok(key) => key,
-        Err(_) => {
-            eprintln!("trust: no addition named {name}");
-            return ExitCode::from(2);
-        }
-    };
-    match entry.delete_key(None, None) {
+    match trust::remove(name) {
         Ok(()) => {
             println!("removed {name}");
             ExitCode::SUCCESS
         }
-        Err(e) => {
-            eprintln!(
-                "trust: {}",
-                describe_registry_error(&format!("{CERTIFICATES_KEY}\\{ADD_KEY}\\{name}"), e)
-            );
-            ExitCode::FAILURE
-        }
+        Err(e) => failed(e),
     }
-}
-
-/// The fingerprint to act on, from a whole fingerprint, a prefix of one as
-/// `trust list` prints it, or a certificate file.
-///
-/// A prefix is resolved against the store, so what `list` shows can be
-/// pasted straight back in. An ambiguous prefix is refused rather than
-/// guessed at: distrusting the wrong certificate is not a mistake worth
-/// being convenient about.
-fn target_fingerprint(argument: &str) -> Result<String, String> {
-    let normalised = normalise_fingerprint(argument);
-    let looks_hex = !normalised.is_empty() && normalised.bytes().all(|b| b.is_ascii_hexdigit());
-    if looks_hex && normalised.len() == 64 {
-        return Ok(normalised);
-    }
-    if looks_hex && normalised.len() >= 8 {
-        let list = roots(false, None)?;
-        let matches: Vec<&Root> = list
-            .iter()
-            .filter(|r| r.fingerprint.starts_with(&normalised))
-            .collect();
-        return match matches.as_slice() {
-            [root] => Ok(root.fingerprint.clone()),
-            [] => Err(format!(
-                "no certificate in the store starts with {normalised} — give the whole fingerprint if you mean one the store does not have"
-            )),
-            many => Err(format!(
-                "{normalised} matches {} certificates; be more specific",
-                many.len()
-            )),
-        };
-    }
-    let der = read_input(argument)?;
-    let parsed = cert::parse(&der, None).map_err(|e| {
-        format!("{argument} is neither a SHA-256 fingerprint nor a certificate ({e})")
-    })?;
-    Ok(parsed.fingerprint)
 }
 
 fn distrust(argument: &str, reason: &str) -> ExitCode {
-    let fingerprint = match target_fingerprint(argument) {
+    let fingerprint = match trust::resolve(argument) {
         Ok(f) => f,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
+        // An unmatched prefix is a mistake in what was typed, not an answer.
+        Err(Error::NotFound(why)) => return failed(Error::Failed(why)),
+        Err(e) => return failed(e),
     };
-    let key = match certificates(DISTRUST_KEY) {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
+    match trust::distrust(&fingerprint, reason) {
+        Ok(was) => {
+            println!("distrusted {fingerprint}");
+            match was {
+                Some(subject) => println!("  was: {subject}"),
+                None => println!(
+                    "  no certificate in the store matched; the entry stays in force in case one arrives"
+                ),
+            }
+            ExitCode::SUCCESS
         }
-    };
-    // Look before writing: afterwards trustd has already dropped the
-    // certificate, so asking then would always answer "no match" and say
-    // the opposite of the truth.
-    let was = roots(false, None).ok().and_then(|list| {
-        list.into_iter()
-            .find(|r| r.fingerprint == fingerprint)
-            .map(|r| r.subject)
-    });
-    let mut data = reason.as_bytes().to_vec();
-    data.push(0);
-    if let Err(e) = key
-        .set_value(fingerprint.as_bytes(), ValueType::SZ, &data)
-        .call()
-    {
-        eprintln!("trust: could not write the distrust: {e}");
-        return ExitCode::FAILURE;
+        Err(e) => failed(e),
     }
-    println!("distrusted {fingerprint}");
-    // Distrusting a certificate the machine does not have is legitimate —
-    // the entry waits in case one arrives — and looks identical otherwise,
-    // so say which happened.
-    match was {
-        Some(subject) => println!("  was: {subject}"),
-        None => println!(
-            "  no certificate in the store matched; the entry stays in force in case one arrives"
-        ),
-    }
-    ExitCode::SUCCESS
-}
-
-/// Every fingerprint under `Distrust\`, with its reason.
-///
-/// Read from the registry rather than the socket: a distrusted certificate
-/// is by definition not in the store, so the daemon cannot answer for it.
-fn distrust_entries() -> Result<Vec<(String, String)>, String> {
-    let key = certificates(DISTRUST_KEY)?;
-    let mut out = Vec::new();
-    for value in key.values(None) {
-        let Ok(value) = value else { continue };
-        let Ok(name) = String::from_utf8(value.name.clone()) else {
-            continue;
-        };
-        let end = value
-            .data
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(value.data.len());
-        let reason = String::from_utf8_lossy(&value.data[..end]).into_owned();
-        out.push((normalise_fingerprint(&name), reason));
-    }
-    out.sort();
-    Ok(out)
 }
 
 fn restore(argument: &str) -> ExitCode {
-    let normalised = normalise_fingerprint(argument);
-    let fingerprint = if normalised.len() == 64 {
-        normalised
-    } else {
-        // Resolve against what is distrusted, not against the store.
-        match distrust_entries() {
-            Ok(entries) => {
-                let matches: Vec<&(String, String)> = entries
-                    .iter()
-                    .filter(|(f, _)| f.starts_with(&normalised))
-                    .collect();
-                match matches.as_slice() {
-                    [(f, _)] => f.clone(),
-                    [] => {
-                        eprintln!("trust: nothing distrusted starts with {normalised}");
-                        return ExitCode::from(2);
-                    }
-                    many => {
-                        eprintln!(
-                            "trust: {normalised} matches {} distrust entries; be more specific",
-                            many.len()
-                        );
-                        return ExitCode::FAILURE;
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("trust: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    let key = match certificates(DISTRUST_KEY) {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    match key.delete_value(fingerprint.as_bytes(), None, None) {
-        Ok(()) => {
+    match trust::restore(argument) {
+        Ok(fingerprint) => {
             println!("restored {fingerprint}");
             ExitCode::SUCCESS
         }
-        Err(e) if e.raw_os_error() == Some(libc::ENOENT) => {
-            eprintln!("trust: {fingerprint} is not distrusted");
-            ExitCode::from(2)
-        }
-        Err(e) => {
-            eprintln!(
-                "trust: {}",
-                describe_registry_error(&format!("{CERTIFICATES_KEY}\\{DISTRUST_KEY}"), e)
-            );
-            ExitCode::FAILURE
-        }
+        Err(e) => failed(e),
     }
 }
 
 fn list_distrusted() -> ExitCode {
-    let entries = match distrust_entries() {
+    let entries = match trust::distrusted() {
         Ok(e) => e,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return failed(e),
     };
-    for (fingerprint, reason) in &entries {
-        if reason.is_empty() {
-            println!(
-                "{}  {fingerprint}",
-                &fingerprint[..16.min(fingerprint.len())]
-            );
+    for entry in &entries {
+        let short = &entry.fingerprint[..16.min(entry.fingerprint.len())];
+        if entry.reason.is_empty() {
+            println!("{short}  {}", entry.fingerprint);
         } else {
-            println!("{}  {reason}", &fingerprint[..16.min(fingerprint.len())]);
+            println!("{short}  {}", entry.reason);
         }
     }
     println!();
@@ -403,12 +132,9 @@ fn list_distrusted() -> ExitCode {
 }
 
 fn list(purpose: Option<String>) -> ExitCode {
-    let list = match roots(false, purpose) {
+    let list = match trust::roots(false, purpose) {
         Ok(list) => list,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return failed(e),
     };
     for root in &list {
         let origin = match root.source {
@@ -429,12 +155,9 @@ fn list(purpose: Option<String>) -> ExitCode {
 
 fn show(prefix: &str, pem_only: bool) -> ExitCode {
     let wanted = normalise_fingerprint(prefix);
-    let list = match roots(true, None) {
+    let list = match trust::roots(true, None) {
         Ok(list) => list,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
+        Err(e) => return failed(e),
     };
     let matches: Vec<&Root> = list
         .iter()
@@ -476,20 +199,9 @@ fn show(prefix: &str, pem_only: bool) -> ExitCode {
 }
 
 fn status() -> ExitCode {
-    let replies = match call(&Request::Status) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let status = match replies.into_iter().next() {
-        Some(Reply::Status(s)) => s,
-        Some(Reply::Error(e)) => {
-            eprintln!("trust: {e}");
-            return ExitCode::FAILURE;
-        }
-        _ => return ExitCode::FAILURE,
+    let status = match trust::status() {
+        Ok(s) => s,
+        Err(e) => return failed(e),
     };
     println!("generation   {}", status.generation);
     println!(
@@ -523,13 +235,12 @@ fn status() -> ExitCode {
 }
 
 fn reload() -> ExitCode {
-    match call(&Request::Reload).map(|r| r.into_iter().next()) {
-        Ok(Some(Reply::Ok)) => ExitCode::SUCCESS,
-        Ok(Some(Reply::Error(e))) | Err(e) => {
+    match trust::reload() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
             eprintln!("trust: {e}");
             ExitCode::FAILURE
         }
-        _ => ExitCode::FAILURE,
     }
 }
 
