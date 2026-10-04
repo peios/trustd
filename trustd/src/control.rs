@@ -20,12 +20,11 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use libtrust::{
-    MAX_MESSAGE_BYTES, ROOTS_PER_CHUNK, Reply, Request, Root, SOCKET_PATH, TRUST_ALL_ACCESS,
-    TRUST_CONTROL, TRUST_QUERY, TRUSTD_RUN_DIR,
+    MAX_MESSAGE_BYTES, ROOTS_PER_CHUNK, Reply, Request, Root, SOCKET_PATH, TRUSTD_RUN_DIR,
 };
 use peios::access::AccessCheck;
 use peios::security::{
-    AccessMask, AceFlags, AclBuilder, GenericMapping, SdBuilder, SecurityDescriptor, Sid, WellKnown,
+    AccessMask, AceFlags, AclBuilder, SdBuilder, SecurityDescriptor, Sid, WellKnown,
 };
 use peios::token::Token;
 
@@ -126,41 +125,8 @@ impl ControlObject {
             }
         }
         ControlObject {
-            sd: Self::default_sd(),
+            sd: libtrust::default_control_security(),
         }
-    }
-
-    fn default_sd() -> SecurityDescriptor {
-        let system = Sid::well_known(WellKnown::System);
-        let administrators = Sid::well_known(WellKnown::Administrators);
-        let everyone = Sid::well_known(WellKnown::Everyone);
-        AclBuilder::new()
-            .allow(system.as_ref(), TRUST_ALL_ACCESS, AceFlags::empty())
-            .allow(administrators.as_ref(), TRUST_ALL_ACCESS, AceFlags::empty())
-            .allow(
-                everyone.as_ref(),
-                TRUST_QUERY | AccessMask::READ_CONTROL.bits(),
-                AceFlags::empty(),
-            )
-            .build()
-            .and_then(|dacl| {
-                SdBuilder::new()
-                    .owner(system.as_ref())
-                    .group(system.as_ref())
-                    .dacl(&dacl)
-                    .build()
-            })
-            .expect("the compiled default descriptor builds")
-    }
-
-    fn mapping() -> GenericMapping {
-        let rc = AccessMask::READ_CONTROL.bits();
-        GenericMapping::new(
-            TRUST_QUERY | rc,
-            TRUST_CONTROL | rc,
-            TRUST_QUERY,
-            TRUST_ALL_ACCESS,
-        )
     }
 
     pub fn permits(&self, stream: &UnixStream, right: u32) -> bool {
@@ -174,7 +140,7 @@ impl ControlObject {
         AccessCheck::new(
             &self.sd,
             AccessMask::from_bits_retain(right),
-            Self::mapping(),
+            libtrust::control_mapping(),
         )
         .token(token.as_fd())
         .check()

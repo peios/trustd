@@ -128,6 +128,173 @@ fn is_ca(certificate: &Certificate) -> bool {
     false
 }
 
+// --------------------------------------------------------------- details ---
+
+/// What a person looking at a certificate wants to know about it. Unlike
+/// [`parse`] this vets nothing: it describes whatever certificate it is
+/// given, so a window can say what a file is before saying why it can't be
+/// trusted.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Details {
+    /// The subject's common name, organisation, unit and country, where it
+    /// has them.
+    pub common_name: Option<String>,
+    pub organisation: Option<String>,
+    pub unit: Option<String>,
+    pub country: Option<String>,
+    /// The whole subject and issuer, RFC 4514-ish.
+    pub subject: String,
+    pub issuer: String,
+    /// Upper-case hex, colon-separated, as other tools print it.
+    pub serial: String,
+    /// Seconds since the epoch.
+    pub not_before: i64,
+    pub not_after: i64,
+    /// The public key in words: "RSA 4096-bit", "ECDSA P-384".
+    pub key: String,
+    /// Whether `basicConstraints` says it is a CA.
+    pub ca: bool,
+}
+
+impl Details {
+    /// What to call it in a list: its common name, else its organisation,
+    /// else its unit, else the whole subject.
+    pub fn name(&self) -> &str {
+        self.common_name
+            .as_deref()
+            .or(self.organisation.as_deref())
+            .or(self.unit.as_deref())
+            .unwrap_or(&self.subject)
+    }
+}
+
+/// Describe one certificate.
+pub fn describe(der: &[u8]) -> Result<Details, Error> {
+    let certificate = Certificate::from_der(der).map_err(|e| Error::Malformed(e.to_string()))?;
+    let tbs = &certificate.tbs_certificate;
+    let mut details = Details {
+        subject: tbs.subject.to_string(),
+        issuer: tbs.issuer.to_string(),
+        serial: {
+            let bytes = tbs.serial_number.as_bytes();
+            match bytes {
+                [0, rest @ ..] if !rest.is_empty() => rest,
+                _ => bytes,
+            }
+        }
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":"),
+        not_before: tbs.validity.not_before.to_unix_duration().as_secs() as i64,
+        not_after: tbs.validity.not_after.to_unix_duration().as_secs() as i64,
+        key: key_words(&tbs.subject_public_key_info),
+        ca: is_ca(&certificate),
+        ..Details::default()
+    };
+    for rdn in tbs.subject.0.iter() {
+        for atv in rdn.0.iter() {
+            let slot = match atv.oid.to_string().as_str() {
+                "2.5.4.3" => &mut details.common_name,
+                "2.5.4.10" => &mut details.organisation,
+                "2.5.4.11" => &mut details.unit,
+                "2.5.4.6" => &mut details.country,
+                _ => continue,
+            };
+            if slot.is_none() {
+                *slot = attribute_text(&atv.value);
+            }
+        }
+    }
+    Ok(details)
+}
+
+/// An attribute's value as text, whichever string type it was written in.
+fn attribute_text(value: &der::Any) -> Option<String> {
+    use der::asn1::{Ia5StringRef, PrintableStringRef, TeletexStringRef, Utf8StringRef};
+    use der::{Tag, Tagged};
+    let text = match value.tag() {
+        Tag::Utf8String => value
+            .decode_as::<Utf8StringRef<'_>>()
+            .ok()?
+            .as_str()
+            .to_owned(),
+        Tag::PrintableString => value
+            .decode_as::<PrintableStringRef<'_>>()
+            .ok()?
+            .as_str()
+            .to_owned(),
+        Tag::Ia5String => value
+            .decode_as::<Ia5StringRef<'_>>()
+            .ok()?
+            .as_str()
+            .to_owned(),
+        Tag::TeletexString => value
+            .decode_as::<TeletexStringRef<'_>>()
+            .ok()?
+            .as_str()
+            .to_owned(),
+        Tag::BmpString => {
+            // UCS-2, big-endian.
+            let units: Vec<u16> = value
+                .value()
+                .chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .collect();
+            String::from_utf16(&units).ok()?
+        }
+        _ => return None,
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// The public key's algorithm and size, in words.
+fn key_words(info: &x509_cert::spki::SubjectPublicKeyInfoOwned) -> String {
+    const RSA: &str = "1.2.840.113549.1.1.1";
+    const EC: &str = "1.2.840.10045.2.1";
+    const ED25519: &str = "1.3.101.112";
+    const ED448: &str = "1.3.101.113";
+    match info.algorithm.oid.to_string().as_str() {
+        RSA => match info.subject_public_key.as_bytes().and_then(rsa_bits) {
+            Some(bits) => format!("RSA {bits}-bit"),
+            None => "RSA".into(),
+        },
+        EC => {
+            let curve = info
+                .algorithm
+                .parameters
+                .as_ref()
+                .and_then(|p| p.decode_as::<der::asn1::ObjectIdentifier>().ok())
+                .map(|oid| oid.to_string());
+            match curve.as_deref() {
+                Some("1.2.840.10045.3.1.7") => "ECDSA P-256".into(),
+                Some("1.3.132.0.34") => "ECDSA P-384".into(),
+                Some("1.3.132.0.35") => "ECDSA P-521".into(),
+                _ => "ECDSA".into(),
+            }
+        }
+        ED25519 => "Ed25519".into(),
+        ED448 => "Ed448".into(),
+        other => other.to_owned(),
+    }
+}
+
+/// The size of an RSA key's modulus, from its `RSAPublicKey` encoding.
+fn rsa_bits(key: &[u8]) -> Option<usize> {
+    use der::Reader as _;
+    let mut reader = der::SliceReader::new(key).ok()?;
+    let modulus = reader
+        .sequence(|r| {
+            let modulus: der::asn1::UintRef<'_> = r.decode()?;
+            let _exponent: der::asn1::UintRef<'_> = r.decode()?;
+            Ok(modulus.as_bytes().to_vec())
+        })
+        .ok()?;
+    let first = *modulus.first()?;
+    Some(modulus.len() * 8 - first.leading_zeros() as usize)
+}
+
 // ------------------------------------------------------------------- PEM ---
 
 const PEM_BEGIN: &str = "-----BEGIN CERTIFICATE-----";
@@ -502,6 +669,48 @@ mod tests {
         let parsed = parse(&der, None).unwrap();
         assert!(parse(&der, Some(parsed.not_after - 1)).is_ok());
         assert_eq!(parse(&der, Some(parsed.not_after + 1)), Err(Error::Expired));
+    }
+
+    #[test]
+    fn real_roots_are_described_as_openssl_describes_them() {
+        let comodo = describe(&from_pem(FIXTURES[0].0)[0]).unwrap();
+        assert_eq!(comodo.name(), "COMODO ECC Certification Authority");
+        assert_eq!(comodo.organisation.as_deref(), Some("COMODO CA Limited"));
+        assert_eq!(comodo.country.as_deref(), Some("GB"));
+        assert_eq!(
+            comodo.serial,
+            "1F:47:AF:AA:62:00:70:50:54:4C:01:9E:9B:63:99:2A"
+        );
+        assert_eq!(comodo.not_before, 1_204_761_600);
+        assert_eq!(comodo.key, "ECDSA P-384");
+        assert_eq!(comodo.subject, comodo.issuer);
+        assert!(comodo.ca);
+
+        // A UTF8String subject with non-ASCII letters, and an RSA key.
+        let netlock = describe(&from_pem(FIXTURES[1].0)[0]).unwrap();
+        assert_eq!(netlock.name(), "NetLock Arany (Class Gold) Főtanúsítvány");
+        assert_eq!(
+            netlock.unit.as_deref(),
+            Some("Tanúsítványkiadók (Certification Services)")
+        );
+        assert_eq!(netlock.key, "RSA 2048-bit");
+
+        let microsec = describe(&from_pem(FIXTURES[2].0)[0]).unwrap();
+        assert_eq!(microsec.key, "RSA 2048-bit");
+        // DER pads a serial whose top bit is set with a zero byte; nobody
+        // prints it.
+        assert_eq!(microsec.serial, "C2:7E:43:04:4E:47:3F:19");
+    }
+
+    #[test]
+    fn describing_rubbish_is_an_error_not_a_panic() {
+        assert!(describe(b"").is_err());
+        let real = from_pem(FIXTURES[0].0).remove(0);
+        for i in (0..real.len()).step_by(5) {
+            let mut mutated = real.clone();
+            mutated[i] ^= 0x80;
+            let _ = describe(&mutated);
+        }
     }
 
     #[test]
