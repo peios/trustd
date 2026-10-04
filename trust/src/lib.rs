@@ -377,12 +377,12 @@ pub fn resolve(argument: &str) -> Result<String, Error> {
     }
     let bytes = std::fs::read(argument).map_err(|e| Error::Failed(format!("{argument}: {e}")))?;
     let der = certificate(&bytes, argument)?;
-    cert::describe(&der).map_err(|e| {
+    let parsed = cert::parse(&der, None).map_err(|e| {
         Error::Failed(format!(
             "{argument} is neither a SHA-256 fingerprint nor a certificate ({e})"
         ))
     })?;
-    Ok(cert::fingerprint(&der))
+    Ok(parsed.fingerprint)
 }
 
 /// Stops trusting the certificate `fingerprint`, wherever it came from,
