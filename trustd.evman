@@ -49,8 +49,9 @@ from what others decided, and it is never told who they were. The
 principal that acted is whoever wrote the addition or the distrust, which
 the registry records (LCS, where the key is audited), or whoever upgraded
 the bundle, which peipkg records. Naming trustd's own SID instead would
-answer "who distrusted this root?" with trustd, which is wrong; join on
-`object.certificate.digest` and the time to find the writer.
+answer "who distrusted this root?" with trustd, which is wrong. The writer
+is on the registry's record of the write under
+`Machine\System\Trust\Certificates`, just before this one.
 
 field: object.certificate.digest            required
 field: object.certificate.name              required
