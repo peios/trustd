@@ -21,7 +21,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use libtrust::{Health, Reply, Request, Root, SHARE_BUNDLE, STORE_DIR, Status};
+use peios::event::EventPolicy;
 use peios::registry::Key;
+use trustd::audit;
 use trustd::log;
 use trustd::render;
 use trustd::store::{self, Composed};
@@ -45,6 +47,11 @@ struct Trustd {
     /// change.
     subscribers: Vec<(UnixStream, bool)>,
     next_id: u64,
+    /// Whether a composition has succeeded since trustd started. The first
+    /// is the baseline the root events are recorded against, not a change.
+    composed_once: bool,
+    /// The emission policy, asked before each root event (`trustd.evman`).
+    events: Option<EventPolicy>,
 }
 
 impl Trustd {
@@ -130,6 +137,12 @@ impl Trustd {
         for warning in &composed.warnings {
             log::warn(format_args!("{warning}"));
         }
+        if self.composed_once {
+            let changes =
+                audit::changes(&self.composed.roots, &composed.roots, &self.config.distrust);
+            audit::record(self.events.as_ref(), &changes);
+        }
+        self.composed_once = true;
         self.composed = composed;
         self.health = Health::Ok;
         self.message = None;
@@ -297,6 +310,16 @@ fn main() -> ExitCode {
         clients: HashMap::new(),
         subscribers: Vec::new(),
         next_id: 0,
+        composed_once: false,
+        events: match EventPolicy::open() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                log::warn(format_args!(
+                    "cannot open the event policy ({e}); root changes are recorded by tier"
+                ));
+                None
+            }
+        },
     };
     trustd.refresh("start");
     if trustd.health == Health::Degraded {
