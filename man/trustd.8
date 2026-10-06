@@ -16,11 +16,21 @@ skipped without discarding the remaining valid trust set. If the packaged
 bundle becomes unreadable, the last rendered store is retained and the daemon
 reports degraded health.
 .PP
+After each recomposition after the first, the daemon writes one
+.BR trustd.root.added ,
+.B trustd.root.removed
+or
+.B trustd.root.distrusted
+event for every root that entered or left the effective set, described in
+.IR /usr/share/evman/trustd.evman .
+.PP
 The service runs as LocalService with its own service SID. A SYSTEM pre-start
 hook creates
 .I /system/retc/ssl
 and grants that service SID access; the daemon itself does not need elevated
-privilege and holds no private key.
+privilege and holds no private key. Its service SID is granted
+.B SeAuditPrivilege
+alone, to write those events.
 .SH CONFIGURATION
 The registry schema and live settings are documented by
 .IR /usr/share/regman/trustd.regman .

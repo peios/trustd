@@ -26,4 +26,7 @@ sh                      = "*"
 ":usr/libexec/trustd/prepare-store"       = "usr/libexec/trustd/prepare-store"
 ":usr/share/regim/trustd-service.reg"     = "usr/share/regim/trustd-service.reg"
 ":usr/share/regman/trustd.regman"         = "usr/share/regman/trustd.regman"
+# The event manual for the trustd.root.* events and the certificate fields
+# they define (PGSS §6.10).
+"@source:trustd.evman"                    = "usr/share/evman/trustd.evman"
 ":usr/share/man/man8/trustd.8.gz"         = "usr/share/man/man8/trustd.8.gz"

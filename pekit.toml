@@ -269,6 +269,14 @@ paths = {key["path"] for key in service["keys"]}
 assert r"Machine\System\Trust" in paths
 assert r"Machine\System\Trust\Certificates\Add" in paths
 assert r"Machine\System\Trust\Certificates\Distrust" in paths
+# trustd's own privilege: SeAuditPrivilege, for the trustd.root.* events.
+grants = {
+    value["name"]: value["data"]
+    for key in service["keys"]
+    if key["path"] == r"Machine\Generic\Authn\Policy\S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888"
+    for value in key["values"]
+}
+assert grants["Privileges"] == ["SeAuditPrivilege"]
 
 regman = (root / "usr/share/regman/trustd.regman").read_text()
 assert r"Machine\System\Trust" in regman

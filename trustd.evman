@@ -1,0 +1,87 @@
+--- field object.certificate.digest
+type: bin
+
+The SHA-256 digest of the certificate's DER encoding: its fingerprint, the
+name a distrust gives it and the one `trust list` prints, carried as 32
+bytes rather than as hexadecimal. The name to search by, because it is the
+only one that identifies a certificate: two certificates can share a
+subject name, and a subject name can be forged.
+
+--- field object.certificate.name
+type: str
+
+The certificate's subject distinguished name, in the form `trust show`
+prints it, such as `CN=DigiCert TLS ECC P384 Root G5,O=DigiCert\, Inc.,C=US`.
+For a person to read; it does not identify the certificate on its own.
+Search by `object.certificate.digest`.
+
+--- field object.certificate.purposes
+type: str.enum[]
+values: server-auth | code-signing
+closed: false
+
+What the certificate is trusted for, one value per purpose, each once. The
+registry spells a purpose in the form `ServerAuth`; the record carries it in
+kebab-case, a hyphen at each change from lower to upper case and in place
+of anything that is not a letter or a digit, so `ServerAuth` is
+`server-auth` and `CodeSigning` is `code-signing`. A root from the shipped
+bundle is trusted for `server-auth`. An administrator may record any other
+purpose, and it appears here in the same form.
+
+--- event trustd.root.added
+tier: standard
+gating: none — every root that enters the set in force is recorded
+cardinality: one per root that entered the set
+
+A root certificate authority entered the set this machine trusts. trustd
+recomposes the set whenever the registry's additions or distrusts change,
+or the shipped bundle is replaced, and writes one record for each root that
+is in the new set and was not in the one before: an addition, a distrust
+lifted, or a root a bundle upgrade brought in.
+
+The set trustd composes when it starts is the baseline these records count
+from, and is not recorded. A change made while trustd was not running is
+seen only as part of that baseline.
+
+No subject. Who wrote an addition or lifted a distrust is the registry's to
+record (LCS, where the key is audited), and a bundle upgrade is peipkg's.
+
+field: object.certificate.digest            required
+field: object.certificate.name              required
+field: object.certificate.purposes          required
+  The purposes the root is trusted for now.
+
+--- event trustd.root.removed
+tier: standard
+gating: none — every root that leaves the set in force, other than by distrust, is recorded
+cardinality: one per root that left the set
+
+A root certificate authority left the set this machine trusts, and no
+distrust names it: its addition was withdrawn, or a bundle upgrade dropped
+it. A root that leaves because it was distrusted is
+`trustd.root.distrusted` instead.
+
+No subject, as for `trustd.root.added`.
+
+field: object.certificate.digest            required
+field: object.certificate.name              required
+field: object.certificate.purposes          required
+  The purposes the root was trusted for until it left.
+
+--- event trustd.root.distrusted
+tier: standard
+gating: none — every root a distrust takes out of the set in force is recorded
+cardinality: one per root that left the set
+
+A distrust took a root certificate authority out of the set this machine
+trusts. A distrust applies to shipped roots and to additions alike. A
+distrust naming a certificate the machine does not have takes nothing out
+and writes no record; if that certificate arrives later it is refused, and
+never enters the set to leave it.
+
+No subject, as for `trustd.root.added`.
+
+field: object.certificate.digest            required
+field: object.certificate.name              required
+field: object.certificate.purposes          required
+  The purposes the root was trusted for until it was distrusted.

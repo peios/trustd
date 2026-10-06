@@ -2,9 +2,17 @@
   "_comment": [
     "The trustd service definition, and the trust store's own keys.",
     "",
-    "Identity is Service (the daemon's own virtual account). trustd needs no privilege at all: it reads a",
+    "Identity is Service (the daemon's own virtual account). trustd needs no privilege to do its job: it reads a",
     "file the ca-certificates package ships, reads the registry, and writes",
-    "/system/retc/ssl. Nothing it holds is secret -- the root set is public,",
+    "/system/retc/ssl. The one privilege granted to trustd itself is",
+    "SeAuditPrivilege, below, so that it can write trustd.root.added,",
+    ".removed and .distrusted (trustd.evman) when the effective root set",
+    "changes; without it the store still changes and the record of it is",
+    "lost, with a warning in the log. The grant is a policy record for",
+    "trustd's service SID (the S-1-5-80 SID derived from 'trustd', as in",
+    "prepare-store), so it reaches trustd alone and not LocalService, which",
+    "timed and resolvd also run as. Nothing it holds is secret -- the root",
+    "set is public,",
     "which is also why its socket is open to everyone. Private keys are",
     "deliberately not trustd's: a key holder is a signing oracle under",
     "compromise and wants the opposite security posture, so machine identity",
@@ -124,6 +132,27 @@
     },
     {
       "path": "Machine\\System\\Trust\\Certificates\\Distrust"
+    },
+    {
+      "path": "Machine\\Generic"
+    },
+    {
+      "path": "Machine\\Generic\\Authn"
+    },
+    {
+      "path": "Machine\\Generic\\Authn\\Policy"
+    },
+    {
+      "path": "Machine\\Generic\\Authn\\Policy\\S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888",
+      "values": [
+        {
+          "name": "Privileges",
+          "type": "multi",
+          "data": [
+            "SeAuditPrivilege"
+          ]
+        }
+      ]
     }
   ]
 }
