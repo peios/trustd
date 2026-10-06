@@ -77,23 +77,48 @@ pub fn listen() -> io::Result<UnixListener> {
 /// the log and a LocalService daemon's lines do not reach the console
 /// (PEI-581). `evctl 'LOGS FROM trustd'` had them all along. Found while
 /// verifying timed, which had inherited the same code.
+///
+/// **trustd keeps full access for itself** (PEI-1373, as timed did in
+/// c186b88). peinit leaves `/run/trustd` in place across a restart, and the
+/// stale socket a previous run left behind has to be deleted before the new
+/// one can bind. Everyone's read, write and execute include neither DELETE
+/// nor deleting a child, so a descriptor of SYSTEM and Everyone alone gave a
+/// trustd that started once and could never start again: every restart
+/// failed with EACCES at the bind, until the restart budget was exhausted.
 pub fn protect(path: &Path) {
     use peios::file::SecInfo;
+    use peios::token::{Token, TokenAccess};
     let system = Sid::well_known(WellKnown::System);
     let everyone = Sid::well_known(WellKnown::Everyone);
-    let descriptor = AclBuilder::new()
-        .allow(
-            system.as_ref(),
-            AccessMask::GENERIC_ALL.bits(),
-            AceFlags::empty(),
-        )
-        .allow(
-            everyone.as_ref(),
-            AccessMask::GENERIC_READ.bits()
-                | AccessMask::GENERIC_WRITE.bits()
-                | AccessMask::GENERIC_EXECUTE.bits(),
-            AceFlags::empty(),
-        )
+    let me = Token::open_self(true, TokenAccess::QUERY).and_then(|t| t.user());
+    let mut acl = AclBuilder::new();
+    acl.allow(
+        system.as_ref(),
+        AccessMask::GENERIC_ALL.bits(),
+        AceFlags::empty(),
+    );
+    match &me {
+        Ok(me) => {
+            acl.allow(
+                me.as_ref(),
+                AccessMask::GENERIC_ALL.bits(),
+                AceFlags::empty(),
+            );
+        }
+        Err(e) => log::warn(format_args!(
+            "could not read trustd's own identity ({e}); a restart may not be able to \
+             replace {}",
+            path.display()
+        )),
+    }
+    acl.allow(
+        everyone.as_ref(),
+        AccessMask::GENERIC_READ.bits()
+            | AccessMask::GENERIC_WRITE.bits()
+            | AccessMask::GENERIC_EXECUTE.bits(),
+        AceFlags::empty(),
+    );
+    let descriptor = acl
         .build()
         .and_then(|dacl| SdBuilder::new().dacl(&dacl).build());
     match descriptor {
