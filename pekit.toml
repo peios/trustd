@@ -215,7 +215,7 @@ test -n "$(find "$DEBUG_ROOT" -type f -print -quit)"
 "org.llvm.clang-devel"            = ">= 22.1.8"
 "org.python.python3"              = "*"
 "org.gnu.gzip"                    = "*"
-"dev.peios.libpeios-devel"        = ">= 0.5.0"
+"dev.peios.libpeios-devel"        = ">= 0.5.8"
 "dev.peios.packaging-tools"       = "*"
 
 [test]
@@ -337,7 +337,7 @@ done
 "org.llvm.clang-devel"            = ">= 22.1.8"
 "org.python.python3"              = "*"
 "org.gnu.gzip"                    = "*"
-"dev.peios.libpeios-devel"        = ">= 0.5.0"
+"dev.peios.libpeios-devel"        = ">= 0.5.8"
 
 [clean]
 command = "cargo clean"
