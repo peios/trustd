@@ -43,8 +43,14 @@ The set trustd composes when it starts is the baseline these records count
 from, and is not recorded. A change made while trustd was not running is
 seen only as part of that baseline.
 
-No subject. Who wrote an addition or lifted a distrust is the registry's to
-record (LCS, where the key is audited), and a bundle upgrade is peipkg's.
+No subject. PGSS §6.4 asks an event about an action for the principal that
+acted, and the action here is not trustd's: trustd only recomposes the set
+from what others decided, and it is never told who they were. The
+principal that acted is whoever wrote the addition or the distrust, which
+the registry records (LCS, where the key is audited), or whoever upgraded
+the bundle, which peipkg records. Naming trustd's own SID instead would
+answer "who distrusted this root?" with trustd, which is wrong; join on
+`object.certificate.digest` and the time to find the writer.
 
 field: object.certificate.digest            required
 field: object.certificate.name              required
