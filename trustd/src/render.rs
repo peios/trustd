@@ -14,10 +14,10 @@
 //! | `certs/<subject-hash>.<n>` | OpenSSL's default `CApath` |
 //!
 //! The hashed directory is not decoration. A `CApath` lookup that finds a
-//! stale file for a distrusted root would keep trusting it, so the directory
-//! is replaced **atomically**: the new one is built alongside and exchanged
-//! in a single syscall. There is no moment at which the directory holds a
-//! mixture of the old set and the new.
+//! stale file for a distrusted root would keep trusting it, so the new
+//! directory is built alongside and exchanged in a single syscall where
+//! supported. The fallback below has a window with no live directory, but
+//! neither path mixes the contents of the old set and the new.
 
 use std::fs;
 use std::io;
@@ -240,12 +240,14 @@ fn remove_dir_if_present(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Put `staging` where `live` is, atomically, and remove what was there.
+/// Put `staging` where `live` is and remove what was there.
 ///
 /// `RENAME_EXCHANGE` swaps the two directories in one syscall, so no reader
 /// ever sees the directory absent, half-built, or holding a mixture of the
 /// old roots and the new. When `live` does not exist yet there is nothing to
-/// exchange with and a plain rename is atomic on its own.
+/// exchange with and a plain rename is atomic on its own. The fallback for
+/// filesystems without exchange support has a window with no live directory;
+/// if installing the staged directory fails, it tries to restore the old one.
 fn exchange(staging: &Path, live: &Path) -> io::Result<()> {
     if !live.exists() {
         return fs::rename(staging, live);
@@ -267,23 +269,49 @@ fn exchange(staging: &Path, live: &Path) -> io::Result<()> {
         // rather than recreated, so their descriptors travel with them.
         let error = io::Error::last_os_error();
         // A filesystem without RENAME_EXCHANGE (or a kernel that lacks the
-        // syscall) still gets a correct store, just with a window in which
-        // the directory is the new one before the old is gone. Better than
-        // refusing to render.
+        // syscall) falls back to two renames. This leaves a window with no
+        // live directory, but never mixes the contents of the two stores.
         if matches!(
             error.raw_os_error(),
             Some(libc::EINVAL) | Some(libc::ENOSYS) | Some(libc::ENOTSUP)
         ) || error.kind() == ErrorKind::PermissionDenied
         {
-            let previous = live.with_extension("previous");
-            remove_dir_if_present(&previous)?;
-            fs::rename(live, &previous)?;
-            fs::rename(staging, live)?;
-            return remove_dir_if_present(&previous);
+            return exchange_fallback(staging, live, |from, to| fs::rename(from, to));
         }
         return Err(error);
     }
     remove_dir_if_present(staging)
+}
+
+/// Install without `RENAME_EXCHANGE`, retaining the old directory until
+/// the replacement is in place. Injecting only rename lets the unit tests
+/// exercise failures deterministically while using real temporary directories.
+fn exchange_fallback(
+    staging: &Path,
+    live: &Path,
+    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let previous = live.with_extension("previous");
+    remove_dir_if_present(&previous)?;
+    rename(live, &previous)?;
+    if let Err(install_error) = rename(staging, live) {
+        // The old directory still has its original contents and descriptor.
+        // Restore it before returning the failed installation to the caller.
+        if let Err(restore_error) = rename(&previous, live) {
+            return Err(io::Error::new(
+                install_error.kind(),
+                format!(
+                    "rename {} to {}: {install_error}; restore {} to {}: {restore_error}",
+                    staging.display(),
+                    live.display(),
+                    previous.display(),
+                    live.display(),
+                ),
+            ));
+        }
+        return Err(install_error);
+    }
+    remove_dir_if_present(&previous)
 }
 
 fn cstring(path: &Path) -> io::Result<std::ffi::CString> {
@@ -343,6 +371,144 @@ mod tests {
             std::env::temp_dir().join(format!("trustd-render-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         path
+    }
+
+    fn fallback_fixture(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let root = scratch(name);
+        let staging = root.join("certs.new");
+        let live = root.join("certs");
+        fs::create_dir_all(&staging).unwrap();
+        fs::create_dir_all(&live).unwrap();
+        fs::write(staging.join("ca-certificates.crt"), b"new bundle").unwrap();
+        fs::write(staging.join("new.0"), b"new root").unwrap();
+        fs::write(live.join("ca-certificates.crt"), b"old bundle").unwrap();
+        fs::write(live.join("old.0"), b"old root").unwrap();
+        (root, staging, live)
+    }
+
+    fn assert_fallback_store(path: &Path, generation: &str) {
+        assert_eq!(
+            fs::read_to_string(path.join("ca-certificates.crt")).unwrap(),
+            format!("{generation} bundle"),
+        );
+        assert_eq!(
+            fs::read_to_string(path.join(format!("{generation}.0"))).unwrap(),
+            format!("{generation} root"),
+        );
+        assert_eq!(fs::read_dir(path).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn exchange_installs_when_there_is_no_previous_live_directory() {
+        let (root, staging, live) = fallback_fixture("exchange-first-install");
+        fs::remove_dir_all(&live).unwrap();
+
+        exchange(&staging, &live).unwrap();
+
+        assert_fallback_store(&live, "new");
+        assert!(!staging.exists());
+        assert!(!live.with_extension("previous").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fallback_installs_complete_staging_and_removes_previous() {
+        let (root, staging, live) = fallback_fixture("fallback-success");
+        let previous = live.with_extension("previous");
+        fs::create_dir(&previous).unwrap();
+        fs::write(previous.join("stale.0"), b"stale root").unwrap();
+
+        exchange_fallback(&staging, &live, |from, to| fs::rename(from, to)).unwrap();
+
+        assert_fallback_store(&live, "new");
+        assert!(!staging.exists());
+        assert!(!previous.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fallback_restores_live_after_install_failure_and_can_retry() {
+        let (root, staging, live) = fallback_fixture("fallback-install-failure");
+        let previous = live.with_extension("previous");
+        let mut calls = Vec::new();
+        let error = exchange_fallback(&staging, &live, |from, to| {
+            calls.push((from.to_path_buf(), to.to_path_buf()));
+            if from == staging {
+                return Err(io::Error::from_raw_os_error(libc::EIO));
+            }
+            fs::rename(from, to)
+        })
+        .unwrap_err();
+
+        assert_eq!(error.raw_os_error(), Some(libc::EIO));
+        assert_fallback_store(&live, "old");
+        assert_fallback_store(&staging, "new");
+        assert!(!previous.exists());
+        assert_eq!(
+            calls,
+            vec![
+                (live.clone(), previous.clone()),
+                (staging.clone(), live.clone()),
+                (previous.clone(), live.clone()),
+            ],
+        );
+
+        // A later refresh can install the same staged directory normally.
+        exchange_fallback(&staging, &live, |from, to| fs::rename(from, to)).unwrap();
+        assert_fallback_store(&live, "new");
+        assert!(!staging.exists());
+        assert!(!previous.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fallback_leaves_live_untouched_when_first_rename_fails() {
+        let (root, staging, live) = fallback_fixture("fallback-first-failure");
+        let mut calls = 0;
+        let error = exchange_fallback(&staging, &live, |_, _| {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(libc::EACCES))
+        })
+        .unwrap_err();
+
+        assert_eq!(error.raw_os_error(), Some(libc::EACCES));
+        assert_eq!(calls, 1);
+        assert_fallback_store(&live, "old");
+        assert_fallback_store(&staging, "new");
+        assert!(!live.with_extension("previous").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fallback_reports_failed_restore_and_retains_previous_store() {
+        let (root, staging, live) = fallback_fixture("fallback-restore-failure");
+        let previous = live.with_extension("previous");
+        let mut calls = 0;
+        let error = exchange_fallback(&staging, &live, |from, to| {
+            calls += 1;
+            if from == staging {
+                return Err(io::Error::new(
+                    ErrorKind::PermissionDenied,
+                    "install blocked",
+                ));
+            }
+            if from == previous {
+                return Err(io::Error::new(ErrorKind::Other, "restore blocked"));
+            }
+            fs::rename(from, to)
+        })
+        .unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+        let message = error.to_string();
+        assert!(message.contains("install blocked"));
+        assert!(message.contains("restore blocked"));
+        assert!(message.contains(&previous.display().to_string()));
+        assert_eq!(calls, 3);
+        assert!(!live.exists());
+        assert_fallback_store(&previous, "old");
+        assert_fallback_store(&staging, "new");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
