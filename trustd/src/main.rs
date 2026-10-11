@@ -12,6 +12,7 @@
 
 mod config;
 mod control;
+mod reload_signal;
 
 use std::collections::HashMap;
 use std::os::fd::AsRawFd;
@@ -280,6 +281,13 @@ fn main() -> ExitCode {
         None => {}
     }
 
+    let mut reload_signal = match reload_signal::open() {
+        Ok(signal) => signal,
+        Err(e) => {
+            log::error(format_args!("reload signal: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
     let listener = match control::listen() {
         Ok(l) => l,
         Err(e) => {
@@ -344,6 +352,7 @@ fn main() -> ExitCode {
             fds.len() - 1
         }
         push(&mut fds, listener.as_raw_fd());
+        let reload_slot = push(&mut fds, reload_signal.as_raw_fd());
         let watch_slot = watch.as_ref().map(|w| push(&mut fds, w.as_raw_fd()));
         let client_slots: Vec<(u64, usize)> = trustd
             .clients
@@ -424,6 +433,16 @@ fn main() -> ExitCode {
         }
 
         let mut refresh = None;
+        if fds[reload_slot].revents != 0 {
+            match reload_signal::drain(&mut reload_signal) {
+                Ok(true) => refresh = Some("SIGHUP requested reload"),
+                Ok(false) => {}
+                Err(e) => {
+                    log::error(format_args!("reload signal: {e}"));
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
         if let Some(slot) = watch_slot {
             if fds[slot].revents != 0 {
                 if let Some(w) = &watch {
