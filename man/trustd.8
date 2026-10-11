@@ -31,6 +31,16 @@ and grants that service SID access; the daemon itself does not need elevated
 privilege and holds no private key. Its service SID is granted
 .B SeAuditPrivilege
 alone, to write those events.
+.SH RELOADING
+SIGHUP asks the running daemon to recompose its store using the same refresh
+path as
+.BR "trust reload" .
+This supports peinit's default service reload without replacing the main
+process. Repeated pending signals may be coalesced into one refresh.
+If recomposition fails, the daemon retains its last rendered store and
+reports degraded health. Inspect
+.B trust status
+for the resulting health; service reload completion alone does not prove it.
 .SH CONFIGURATION
 The registry schema and live settings are documented by
 .IR /usr/share/regman/trustd.regman .
