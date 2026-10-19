@@ -1,0 +1,16 @@
+{
+    "format": 1,
+    "component": "trustd",
+    "origin": {
+        "repository": "https://github.com/peios/integration-tests.git",
+        "commit": "a9aeaa2d6255bf59034ac5d90bee871a0d4829be"
+    },
+    "files": {
+        "tests/network/trustd-restart.test.lua": "tests/network/trustd-restart.test.lua",
+        "tests/trustd/root-events.test.lua": "tests/trustd/root-events.test.lua"
+    },
+    "tests": [
+        "tests/network/trustd-restart.test.lua",
+        "tests/trustd/root-events.test.lua"
+    ]
+}
