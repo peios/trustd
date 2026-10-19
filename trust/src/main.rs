@@ -18,15 +18,29 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use libtrust::{Root, Source};
-use trust::{Error, cert, normalise_fingerprint};
+use std::time::Duration;
+use trust_client::Error;
+use trust_core::{Root, Source};
+use trust_core::{cert, store::normalise_fingerprint};
+
+fn failed_error(message: String) -> Error {
+    Error {
+        code: libc::EIO,
+        message,
+    }
+}
+fn client() -> Result<trust_client::Client, Error> {
+    trust_client::Client::system(Duration::from_secs(10))
+}
 
 /// What a refused step exits with: 2 for "not there", so a script can tell
 /// "this machine does not trust that CA" from "I could not find out".
 fn failed(error: Error) -> ExitCode {
     eprintln!("trust: {error}");
     match error {
-        Error::NotFound(_) => ExitCode::from(2),
+        Error {
+            code: libc::ENOENT, ..
+        } => ExitCode::from(2),
         _ => ExitCode::FAILURE,
     }
 }
@@ -36,16 +50,16 @@ fn read_input(path: &str) -> Result<Vec<u8>, Error> {
         let mut buffer = Vec::new();
         std::io::stdin()
             .read_to_end(&mut buffer)
-            .map_err(|e| Error::Failed(format!("stdin: {e}")))?;
+            .map_err(|e| failed_error(format!("stdin: {e}")))?;
         buffer
     } else {
-        std::fs::read(path).map_err(|e| Error::Failed(format!("{path}: {e}")))?
+        std::fs::read(path).map_err(|e| failed_error(format!("{path}: {e}")))?
     };
-    trust::certificate(&bytes, path)
+    trust_client::certificate(&bytes, path)
 }
 
 fn add(name: &str, path: &str, purposes: &[String]) -> ExitCode {
-    if !trust::usable_name(name) {
+    if !trust_client::usable_name(name).unwrap_or(false) {
         eprintln!("trust: {name:?} is not a usable name");
         return ExitCode::FAILURE;
     }
@@ -53,11 +67,11 @@ fn add(name: &str, path: &str, purposes: &[String]) -> ExitCode {
         Ok(der) => der,
         Err(e) => return failed(e),
     };
-    if let Err(e) = trust::vet(&der) {
+    if let Err(e) = trust_client::vet(&der) {
         eprintln!("trust: {path} is {e}");
         return ExitCode::FAILURE;
     }
-    match trust::add(name, &der, purposes) {
+    match trust_client::add(name, &der, purposes) {
         Ok(parsed) => {
             println!("added {name}");
             println!("  {}", parsed.subject);
@@ -72,7 +86,7 @@ fn add(name: &str, path: &str, purposes: &[String]) -> ExitCode {
 }
 
 fn remove(name: &str) -> ExitCode {
-    match trust::remove(name) {
+    match trust_client::remove(name) {
         Ok(()) => {
             println!("removed {name}");
             ExitCode::SUCCESS
@@ -82,13 +96,13 @@ fn remove(name: &str) -> ExitCode {
 }
 
 fn distrust(argument: &str, reason: &str) -> ExitCode {
-    let fingerprint = match trust::resolve(argument) {
+    let fingerprint = match trust_client::resolve(argument) {
         Ok(f) => f,
         // An unmatched prefix is a mistake in what was typed, not an answer.
-        Err(Error::NotFound(why)) => return failed(Error::Failed(why)),
+        Err(error) if error.code == libc::ENOENT => return failed(failed_error(error.message)),
         Err(e) => return failed(e),
     };
-    match trust::distrust(&fingerprint, reason) {
+    match trust_client::distrust(&fingerprint, reason) {
         Ok(was) => {
             println!("distrusted {fingerprint}");
             match was {
@@ -104,7 +118,7 @@ fn distrust(argument: &str, reason: &str) -> ExitCode {
 }
 
 fn restore(argument: &str) -> ExitCode {
-    match trust::restore(argument) {
+    match trust_client::restore(argument) {
         Ok(fingerprint) => {
             println!("restored {fingerprint}");
             ExitCode::SUCCESS
@@ -114,7 +128,7 @@ fn restore(argument: &str) -> ExitCode {
 }
 
 fn list_distrusted() -> ExitCode {
-    let entries = match trust::distrusted() {
+    let entries = match trust_client::distrusted() {
         Ok(e) => e,
         Err(e) => return failed(e),
     };
@@ -132,7 +146,7 @@ fn list_distrusted() -> ExitCode {
 }
 
 fn list(purpose: Option<String>) -> ExitCode {
-    let list = match trust::roots(false, purpose) {
+    let list = match client().and_then(|client| client.roots(false, purpose.as_deref())) {
         Ok(list) => list,
         Err(e) => return failed(e),
     };
@@ -155,7 +169,7 @@ fn list(purpose: Option<String>) -> ExitCode {
 
 fn show(prefix: &str, pem_only: bool) -> ExitCode {
     let wanted = normalise_fingerprint(prefix);
-    let list = match trust::roots(true, None) {
+    let list = match client().and_then(|client| client.roots(true, None)) {
         Ok(list) => list,
         Err(e) => return failed(e),
     };
@@ -199,7 +213,7 @@ fn show(prefix: &str, pem_only: bool) -> ExitCode {
 }
 
 fn status() -> ExitCode {
-    let status = match trust::status() {
+    let status = match client().and_then(|client| client.status()) {
         Ok(s) => s,
         Err(e) => return failed(e),
     };
@@ -235,7 +249,7 @@ fn status() -> ExitCode {
 }
 
 fn reload() -> ExitCode {
-    match trust::reload() {
+    match client().and_then(|client| client.reload()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("trust: {e}");

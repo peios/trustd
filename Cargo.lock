@@ -193,7 +193,10 @@ dependencies = [
 name = "libtrust"
 version = "0.1.6"
 dependencies = [
- "peios",
+ "libc",
+ "trust-abi",
+ "trust-client-core",
+ "trust-core",
 ]
 
 [[package]]
@@ -227,7 +230,7 @@ dependencies = [
 [[package]]
 name = "peios"
 version = "0.4.0"
-source = "git+https://github.com/peios/peios-rs.git?rev=f8c84930f2b71763bcf0550df0b1420a0f63b21e#f8c84930f2b71763bcf0550df0b1420a0f63b21e"
+source = "git+https://github.com/peios/peios-rs.git?rev=26ac6968cec4cb7f887198aa3fb9268096660831#26ac6968cec4cb7f887198aa3fb9268096660831"
 dependencies = [
  "bitflags",
  "libc",
@@ -237,7 +240,7 @@ dependencies = [
 [[package]]
 name = "peios-sys"
 version = "0.3.0"
-source = "git+https://github.com/peios/peios-rs.git?rev=f8c84930f2b71763bcf0550df0b1420a0f63b21e#f8c84930f2b71763bcf0550df0b1420a0f63b21e"
+source = "git+https://github.com/peios/peios-rs.git?rev=26ac6968cec4cb7f887198aa3fb9268096660831#26ac6968cec4cb7f887198aa3fb9268096660831"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -387,9 +390,42 @@ name = "trust"
 version = "0.1.6"
 dependencies = [
  "libc",
- "libtrust",
  "peios",
- "trustd",
+ "trust-client",
+ "trust-core",
+]
+
+[[package]]
+name = "trust-abi"
+version = "0.1.6"
+
+[[package]]
+name = "trust-client"
+version = "0.1.6"
+dependencies = [
+ "libc",
+ "trust-abi",
+ "trust-core",
+]
+
+[[package]]
+name = "trust-client-core"
+version = "0.1.6"
+dependencies = [
+ "libc",
+ "peios",
+ "trust-core",
+]
+
+[[package]]
+name = "trust-core"
+version = "0.1.6"
+dependencies = [
+ "der",
+ "peios",
+ "sha1",
+ "sha2",
+ "x509-cert",
 ]
 
 [[package]]
@@ -398,10 +434,10 @@ version = "0.1.6"
 dependencies = [
  "der",
  "libc",
- "libtrust",
  "peios",
  "sha1",
  "sha2",
+ "trust-core",
  "x509-cert",
 ]
 

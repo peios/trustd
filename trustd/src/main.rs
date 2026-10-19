@@ -14,16 +14,18 @@ mod config;
 mod control;
 mod reload_signal;
 
+mod notification;
+
 use std::collections::HashMap;
 use std::os::fd::AsRawFd;
-use std::os::unix::net::{UnixDatagram, UnixStream};
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use libtrust::{Health, Reply, Request, Root, SHARE_BUNDLE, STORE_DIR, Status};
 use peios::event::EventPolicy;
 use peios::registry::Key;
+use trust_core::{Health, Reply, Request, Root, SHARE_BUNDLE, STORE_DIR, Status};
 use trustd::audit;
 use trustd::log;
 use trustd::render;
@@ -104,7 +106,13 @@ impl Trustd {
     /// Recompose from the registry and the shipped bundle, render if the
     /// result differs from what is already out there, and tell subscribers.
     fn refresh(&mut self, reason: &str) {
-        let fresh = config::load();
+        let fresh = match config::load() {
+            Ok(config) => config,
+            Err(error) => {
+                self.degrade(format!("keeping previous configuration: {error}"));
+                return;
+            }
+        };
         let config_changed = fresh != self.config;
         if config_changed {
             self.control = control::ControlObject::new(fresh.control_security.as_deref());
@@ -243,23 +251,31 @@ impl Trustd {
             }
             Request::Reload => {
                 self.refresh("reload requested");
-                control::respond(&mut stream, &Reply::Ok);
+                let reply = if self.health == Health::Degraded {
+                    Reply::Error(
+                        self.message
+                            .clone()
+                            .unwrap_or_else(|| "trust store is degraded".into()),
+                    )
+                } else {
+                    Reply::Ok
+                };
+                control::respond(&mut stream, &reply);
             }
         }
     }
 }
 
 fn notify_ready() {
-    let Ok(path) = std::env::var("NOTIFY_SOCKET") else {
+    let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
         return;
     };
-    match UnixDatagram::unbound() {
-        Ok(s) => {
-            if let Err(e) = s.send_to(b"READY=1", &path) {
-                log::warn(format_args!("readiness notify: {e}"));
-            }
-        }
-        Err(e) => log::warn(format_args!("readiness notify: {e}")),
+    if let Err(error) = notification::send(
+        std::path::Path::new(&path),
+        b"READY=1",
+        Duration::from_secs(1),
+    ) {
+        log::warn(format_args!("notify: {error}"));
     }
 }
 
@@ -304,7 +320,13 @@ fn main() -> ExitCode {
             None
         }
     };
-    let config = config::load();
+    let config = match config::load() {
+        Ok(config) => config,
+        Err(error) => {
+            log::error(format_args!("reading configuration: {error}"));
+            return ExitCode::FAILURE;
+        }
+    };
     let control = control::ControlObject::new(config.control_security.as_deref());
     let mut trustd = Trustd {
         config,
@@ -443,17 +465,16 @@ fn main() -> ExitCode {
                 }
             }
         }
-        if let Some(slot) = watch_slot {
-            if fds[slot].revents != 0 {
-                if let Some(w) = &watch {
-                    match w.read_watch_events(&mut watch_buffer) {
-                        Ok(events) if !events.is_empty() => refresh = Some("the registry changed"),
-                        Ok(_) => {}
-                        Err(e) => {
-                            log::warn(format_args!("registry watch: {e}; re-arming"));
-                            watch = config::watch().ok();
-                        }
-                    }
+        if let Some(slot) = watch_slot
+            && fds[slot].revents != 0
+            && let Some(w) = &watch
+        {
+            match w.read_watch_events(&mut watch_buffer) {
+                Ok(events) if !events.is_empty() => refresh = Some("the registry changed"),
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn(format_args!("registry watch: {e}; re-arming"));
+                    watch = config::watch().ok();
                 }
             }
         }

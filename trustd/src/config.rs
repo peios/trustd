@@ -18,11 +18,15 @@
 //!       <sha256 fingerprint> REG_SZ      why, for whoever reads it later
 //! ```
 
-use libtrust::{
+use std::io;
+use peios::registry::{Key, KeyAccess, OpenFlags, ValueType};
+#[path = "registry_reader.rs"]
+mod reader;
+use reader::{Reader, open, strings};
+use trust_core::{
     ADD_KEY, CERTIFICATE_VALUE, COMPAT_VALUE, CONTROL_SECURITY_VALUE, DISTRUST_KEY, PURPOSES_VALUE,
     TRUST_KEY,
 };
-use peios::registry::{Key, KeyAccess, OpenFlags, RegValue, ValueType};
 
 use crate::log;
 use crate::render::Compat;
@@ -48,75 +52,40 @@ impl Default for Config {
     }
 }
 
-fn sz(v: &RegValue) -> Option<String> {
-    if v.ty != ValueType::SZ && v.ty != ValueType::EXPAND_SZ {
-        return None;
-    }
-    let end = v.data.iter().position(|&b| b == 0).unwrap_or(v.data.len());
-    String::from_utf8(v.data[..end].to_vec()).ok()
+pub fn load() -> io::Result<Config> {
+    let root = open(None, TRUST_KEY)?;
+    load_from(root.as_ref())
 }
 
-fn multi(v: &RegValue) -> Option<Vec<String>> {
-    match v.ty {
-        ValueType::MULTI_SZ => Some(
-            v.data
-                .split(|&b| b == 0)
-                .filter(|s| !s.is_empty())
-                .filter_map(|s| String::from_utf8(s.to_vec()).ok())
-                .collect(),
-        ),
-        ValueType::SZ | ValueType::EXPAND_SZ => sz(v).map(|s| vec![s]),
-        _ => None,
-    }
-}
-
-fn read(key: &Key, name: &str) -> Option<RegValue> {
-    key.query_value(name.as_bytes(), None).ok()
-}
-
-fn open(parent: Option<&Key>, path: &str) -> Option<Key> {
-    Key::open(
-        parent,
-        path,
-        KeyAccess::QUERY_VALUE | KeyAccess::ENUMERATE_SUB_KEYS,
-        OpenFlags::empty(),
-    )
-    .ok()
-}
-
-pub fn load() -> Config {
+fn load_from(root: Option<&impl Reader>) -> io::Result<Config> {
     let mut config = Config::default();
-    let Some(root) = open(None, TRUST_KEY) else {
-        // Before the seed applies there is no key, and the defaults are the
-        // right answer: render the shipped roots, add nothing, distrust
-        // nothing.
-        return config;
+    let Some(root) = root else {
+        return Ok(config);
     };
-    if let Some(v) = read(&root, COMPAT_VALUE) {
-        if v.ty == ValueType::DWORD && v.data.len() == 4 {
-            config.compat = Compat::from_dword(u32::from_le_bytes([
-                v.data[0], v.data[1], v.data[2], v.data[3],
-            ]));
-        }
+    if let Some(v) = root.value(COMPAT_VALUE)?
+        && v.ty == ValueType::DWORD
+        && v.data.len() == 4
+    {
+        config.compat = Compat::from_dword(u32::from_le_bytes([
+            v.data[0], v.data[1], v.data[2], v.data[3],
+        ]));
     }
-    config.control_security = read(&root, CONTROL_SECURITY_VALUE)
+    config.control_security = root
+        .value(CONTROL_SECURITY_VALUE)?
         .filter(|v| v.ty == ValueType::BINARY && !v.data.is_empty())
         .map(|v| v.data);
 
-    let Some(certificates) = open(Some(&root), "Certificates") else {
-        return config;
+    let Some(certificates) = root.child("Certificates")? else {
+        return Ok(config);
     };
 
-    if let Some(add) = open(Some(&certificates), ADD_KEY) {
-        for subkey in add.subkeys(None) {
-            let Ok(subkey) = subkey else { continue };
-            let Ok(name) = String::from_utf8(subkey.name.clone()) else {
-                continue;
-            };
-            let Some(entry) = open(Some(&add), &name) else {
-                continue;
-            };
-            let Some(certificate) = read(&entry, CERTIFICATE_VALUE) else {
+    if let Some(add) = certificates.child(ADD_KEY)? {
+        for subkey in add.names()? {
+            let name = reader::text(&subkey)?;
+            let entry = add
+                .child(&name)?
+                .ok_or_else(|| reader::invalid("enumerated certificate key disappeared"))?;
+            let Some(certificate) = entry.value(CERTIFICATE_VALUE)? else {
                 // A key with no certificate is an entry mid-write (the
                 // certificate is written last, exactly so this state is
                 // never mistaken for a valid one) or an abandoned one.
@@ -128,9 +97,7 @@ pub fn load() -> Config {
                 ));
                 continue;
             }
-            let purposes = read(&entry, PURPOSES_VALUE)
-                .and_then(|v| multi(&v))
-                .unwrap_or_default();
+            let purposes = strings(&entry, PURPOSES_VALUE)?.unwrap_or_default();
             config.additions.push(Addition {
                 name,
                 der: certificate.data,
@@ -139,12 +106,9 @@ pub fn load() -> Config {
         }
     }
 
-    if let Some(distrust) = open(Some(&certificates), DISTRUST_KEY) {
-        for value in distrust.values(None) {
-            let Ok(value) = value else { continue };
-            let Ok(name) = String::from_utf8(value.name.clone()) else {
-                continue;
-            };
+    if let Some(distrust) = certificates.child(DISTRUST_KEY)? {
+        for value in distrust.values()? {
+            let name = reader::text(&value.name)?;
             let fingerprint = normalise_fingerprint(&name);
             if fingerprint.len() != 64 || !fingerprint.bytes().all(|b| b.is_ascii_hexdigit()) {
                 log::warn(format_args!(
@@ -159,7 +123,7 @@ pub fn load() -> Config {
     config.additions.sort_by(|a, b| a.name.cmp(&b.name));
     config.distrust.sort();
     config.distrust.dedup();
-    config
+    Ok(config)
 }
 
 /// Arm a subtree watch on `Machine\System\Trust`.
@@ -173,4 +137,113 @@ pub fn watch() -> peios::Result<Key> {
     key.notify(NotifyFilter::ALL, true)?;
     key.set_nonblocking(true)?;
     Ok(key)
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+    struct Fixture {
+        fault: &'static str,
+        path: String,
+    }
+    impl Reader for Fixture {
+        fn value(&self, name: &str) -> io::Result<Option<peios::registry::RegValue>> {
+            if self.fault == "value" && name == "ControlSecurity" {
+                return Err(io::Error::from_raw_os_error(libc::EIO));
+            }
+            Ok(None)
+        }
+
+        fn values(&self) -> io::Result<Vec<peios::registry::ValueRecord>> {
+            if self.fault == "values" {
+                return Err(io::Error::from_raw_os_error(libc::EIO));
+            }
+            Ok(vec![])
+        }
+        fn child(&self, name: &str) -> io::Result<Option<Self>> {
+            if self.fault == "child" {
+                return Err(io::Error::from_raw_os_error(libc::EACCES));
+            }
+            if self.fault == "disappeared" && name == "entry" {
+                return Ok(None);
+            }
+            Ok(Some(Self {
+                fault: self.fault,
+                path: name.into(),
+            }))
+        }
+
+        fn names(&self) -> io::Result<Vec<Vec<u8>>> {
+            if self.fault == "names" {
+                return Err(io::Error::from_raw_os_error(libc::EIO));
+            }
+            if self.fault == "disappeared" && self.path == "Add" {
+                return Ok(vec![b"entry".to_vec()]);
+            }
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn missing_configuration_keeps_documented_defaults() {
+        assert_eq!(load_from(None::<&Fixture>).unwrap(), Config::default());
+        assert_eq!(
+            load_from(Some(&Fixture {
+                fault: "",
+                path: String::new()
+            }))
+            .unwrap(),
+            Config::default()
+        );
+    }
+    #[test]
+    fn failed_value_reads_do_not_produce_a_partial_configuration() {
+        let error = load_from(Some(&Fixture {
+            fault: "value",
+            path: String::new(),
+        }))
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EIO));
+    }
+    #[test]
+    fn malformed_text_cannot_silently_remove_one_list_entry() {
+        let value = peios::registry::RegValue {
+            sequence: 0,
+            ty: ValueType::MULTI_SZ,
+            data: b"valid\0\xff\0\0".to_vec(),
+            layer: vec![],
+        };
+        assert_eq!(
+            reader::multi(&value).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn unreadable_subtrees_and_enumeration_failures_reject_the_read() {
+        for fault in ["child", "values"] {
+            assert!(
+                load_from(Some(&Fixture {
+                    fault,
+                    path: String::new()
+                }))
+                .is_err(),
+                "{fault}"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_or_disappearing_certificate_enumerations_are_rejected() {
+        for fault in ["names", "disappeared"] {
+            assert!(
+                load_from(Some(&Fixture {
+                    fault,
+                    path: String::new()
+                }))
+                .is_err(),
+                "{fault}"
+            );
+        }
+    }
 }

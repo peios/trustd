@@ -4,11 +4,14 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    if let Ok(request) = libtrust::Request::decode(data) {
-        assert_eq!(libtrust::Request::decode(&request.encode()).unwrap(), request);
+    if let Ok(request) = trust_core::Request::decode(data) {
+        assert_eq!(
+            trust_core::Request::decode(&request.encode()).unwrap(),
+            request
+        );
     }
-    if let Ok(reply) = libtrust::Reply::decode(data) {
-        let _ = libtrust::Reply::decode(&reply.encode()).unwrap();
+    if let Ok(reply) = trust_core::Reply::decode(data) {
+        let _ = trust_core::Reply::decode(&reply.encode()).unwrap();
     }
-    let _ = libtrust::recv(&mut &data[..]);
+    let _ = trust_core::recv(&mut &data[..]);
 });

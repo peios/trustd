@@ -12,7 +12,12 @@ use trustd::cert;
 fuzz_target!(|data: &[u8]| {
     if let Ok(parsed) = cert::parse(data, None) {
         assert_eq!(parsed.fingerprint.len(), 64);
-        assert!(parsed.fingerprint.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        assert!(
+            parsed
+                .fingerprint
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        );
         assert_eq!(parsed.subject_hash.len(), 8);
         assert!(parsed.subject_hash.bytes().all(|b| b.is_ascii_hexdigit()));
         assert_eq!(parsed.der, data);

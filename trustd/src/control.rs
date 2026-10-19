@@ -19,14 +19,12 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use libtrust::{
+use peios::access::AccessCheck;
+use peios::security::{AccessMask, AceFlags, AclBuilder, SdBuilder, SecurityDescriptor, Sid, WellKnown};
+use peios::token::Token;
+use trust_core::{
     MAX_MESSAGE_BYTES, ROOTS_PER_CHUNK, Reply, Request, Root, SOCKET_PATH, TRUSTD_RUN_DIR,
 };
-use peios::access::AccessCheck;
-use peios::security::{
-    AccessMask, AceFlags, AclBuilder, SdBuilder, SecurityDescriptor, Sid, WellKnown,
-};
-use peios::token::Token;
 
 use crate::log;
 
@@ -150,7 +148,7 @@ impl ControlObject {
             }
         }
         ControlObject {
-            sd: libtrust::default_control_security(),
+            sd: trust_core::default_control_security(),
         }
     }
 
@@ -165,7 +163,7 @@ impl ControlObject {
         AccessCheck::new(
             &self.sd,
             AccessMask::from_bits_retain(right),
-            libtrust::control_mapping(),
+            trust_core::control_mapping(),
         )
         .token(token.as_fd())
         .check()
@@ -237,22 +235,46 @@ impl Client {
 
 /// Send one reply, blocking with a deadline.
 pub fn respond(stream: &mut UnixStream, reply: &Reply) -> bool {
-    write_message(stream, &reply.encode())
+    write_message(stream, &reply.encode(), Instant::now() + WRITE_TIMEOUT)
 }
 
-fn write_message(stream: &mut UnixStream, payload: &[u8]) -> bool {
-    let _ = stream.set_nonblocking(false);
-    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
-    let mut frame = Vec::with_capacity(4 + payload.len());
-    frame.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    frame.extend_from_slice(payload);
-    match stream.write_all(&frame) {
+fn write_message(stream: &mut UnixStream, payload: &[u8], end: Instant) -> bool {
+    match write_frame(stream, payload, end) {
         Ok(()) => true,
-        Err(e) => {
-            log::warn(format_args!("control: reply failed: {e}"));
+        Err(error) => {
+            log::warn(format_args!("control: reply failed: {error}"));
             false
         }
     }
+}
+
+fn write_frame(stream: &mut UnixStream, payload: &[u8], end: Instant) -> io::Result<()> {
+    let length = u32::try_from(payload.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "reply is too large"))?;
+    stream.set_nonblocking(false)?;
+    let mut frame = Vec::with_capacity(4 + payload.len());
+    frame.extend_from_slice(&length.to_le_bytes());
+    frame.extend_from_slice(payload);
+    let mut pending = frame.as_slice();
+    while !pending.is_empty() {
+        let remaining = end
+            .checked_duration_since(Instant::now())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "reply deadline expired"))?;
+        stream.set_write_timeout(Some(remaining))?;
+        match stream.write(pending) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "peer stopped accepting reply",
+                ));
+            }
+            Ok(count) => pending = &pending[count..],
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 /// Send the root set as a run of chunked messages. Returns false if the peer
@@ -268,6 +290,7 @@ pub fn send_roots(stream: &mut UnixStream, generation: u64, roots: &[Root]) -> b
             },
         );
     }
+    let end = Instant::now() + WRITE_TIMEOUT;
     let chunks: Vec<&[Root]> = roots.chunks(ROOTS_PER_CHUNK).collect();
     for (i, chunk) in chunks.iter().enumerate() {
         let reply = Reply::Roots {
@@ -275,9 +298,60 @@ pub fn send_roots(stream: &mut UnixStream, generation: u64, roots: &[Root]) -> b
             roots: chunk.to_vec(),
             more: i + 1 < chunks.len(),
         };
-        if !write_message(stream, &reply.encode()) {
+        if !write_message(stream, &reply.encode(), end) {
             return false;
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expired_snapshot_deadline_does_not_restart_for_another_frame() {
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        let end = Instant::now() + Duration::from_secs(1);
+        write_frame(&mut writer, b"first", end).unwrap();
+        let expired = Instant::now() - Duration::from_secs(1);
+        let error = write_frame(&mut writer, b"second", expired).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        drop(writer);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"\x05\0\0\0first");
+    }
+
+    #[test]
+    fn a_stalled_peer_cannot_hold_a_reply_open() {
+        let (mut writer, _reader) = UnixStream::pair().unwrap();
+        writer.set_nonblocking(true).unwrap();
+        let bytes = [0u8; 4096];
+        loop {
+            match writer.write(&bytes) {
+                Ok(_) => continue,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("filling socket: {error}"),
+            }
+        }
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = write_frame(
+                &mut writer,
+                b"reply",
+                Instant::now() + Duration::from_millis(20),
+            );
+            sent.send(result).unwrap();
+        });
+        let error = received
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
+        worker.join().unwrap();
+    }
 }

@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["libtrust", "trustd", "trust"]
+members = ["libtrust", "trust-client", "trust-abi", "trust-core", "trust-client-core", "trustd", "trust"]
 
 # trustd is its own workspace root, like netd and resolvd.
 #
-#   libtrust  the control wire: paths, rights, request/reply codec, the root
+#   trust-core  the control wire: paths, rights, request/reply codec, the root
 #             record. No I/O, no policy.
 #   trustd    the daemon. Composes the shipped bundle with the registry's
 #             additions and distrusts, renders the compat files, serves the
@@ -23,7 +23,7 @@ publish = false
 [workspace.dependencies]
 libc = "0.2"
 # Exact public binding revision shared with the qualified Eventd release.
-peios = { git = "https://github.com/peios/peios-rs.git", rev = "f8c84930f2b71763bcf0550df0b1420a0f63b21e", package = "peios" }
+peios = { git = "https://github.com/peios/peios-rs.git", rev = "26ac6968cec4cb7f887198aa3fb9268096660831", package = "peios" }
 
 [profile.release]
 codegen-units = 1

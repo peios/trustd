@@ -1,0 +1,12 @@
+[package]
+name = "trust-client-core"
+description = "Internal trust management operations shared by the C API."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+trust-core = { path = "../trust-core" }
+libc.workspace = true
+peios.workspace = true

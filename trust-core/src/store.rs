@@ -23,7 +23,7 @@
 //! certificate, not a CA, or expired is skipped with a warning, because one
 //! administrator's typo should not take the machine's trust store down.
 
-use libtrust::Source;
+use crate::Source;
 
 use crate::cert::{self, Parsed};
 
@@ -169,7 +169,7 @@ pub fn compose(
 fn push(out: &mut Composed, seen: &mut Vec<String>, distrust: &[String], entry: Entry) {
     let fingerprint = entry.parsed.fingerprint.clone();
     seen.push(fingerprint.clone());
-    if distrust.iter().any(|f| *f == fingerprint) {
+    if distrust.contains(&fingerprint) {
         out.warnings.push(format!(
             "{} is distrusted ({fingerprint})",
             entry.parsed.subject
@@ -302,7 +302,7 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join(":"),
         ] {
-            let composed = compose(&shipped, &[], &[form.clone()], None).unwrap();
+            let composed = compose(&shipped, &[], std::slice::from_ref(&form), None).unwrap();
             assert_eq!(composed.roots.len(), 2, "form {form}");
             assert!(
                 !composed

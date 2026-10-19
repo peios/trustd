@@ -20,11 +20,12 @@
 //! neither path mixes the contents of the old set and the new.
 
 use std::fs;
-use std::io;
 use std::io::ErrorKind;
+use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::cert;
 use crate::store::{self, Composed, Entry};
@@ -81,11 +82,11 @@ fn header(roots: &[&Entry]) -> String {
         roots.len(),
         roots
             .iter()
-            .filter(|r| r.source == libtrust::Source::Shipped)
+            .filter(|r| r.source == trust_core::Source::Shipped)
             .count(),
         roots
             .iter()
-            .filter(|r| r.source == libtrust::Source::Added)
+            .filter(|r| r.source == trust_core::Source::Added)
             .count(),
     )
 }
@@ -199,10 +200,52 @@ pub fn render(root: &Path, composed: &Composed, compat: Compat) -> io::Result<Ve
 
 /// Write a file whole or not at all: a reader never sees a partial store.
 fn write_file(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, contents)?;
-    set_mode(&temporary, FILE_MODE);
-    fs::rename(&temporary, path)
+    let (temporary, mut file) = TemporaryFile::create(path)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    set_mode(&temporary.0, FILE_MODE);
+    fs::rename(&temporary.0, path)
+}
+
+/// Own an exclusively created sibling until installation or cleanup.
+struct TemporaryFile(PathBuf);
+
+impl TemporaryFile {
+    fn create(destination: &Path) -> io::Result<(Self, fs::File)> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let parent = destination
+            .parent()
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "destination has no parent"))?;
+        for _ in 0..64 {
+            let path = parent.join(format!(
+                ".trustd-{}-{}.tmp",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(FILE_MODE)
+                .open(&path)
+            {
+                Ok(file) => return Ok((Self(path), file)),
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(io::Error::new(
+            ErrorKind::AlreadyExists,
+            "cannot reserve a trust staging file",
+        ))
+    }
+}
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        // After installation the original name is absent. On failure this removes
+        // only the file reserved by this operation; the trusted parent owns naming.
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 /// Best-effort, and deliberately so. On Peios access is decided by the
@@ -357,11 +400,12 @@ mod tests {
     use crate::store::{self, Addition};
     use std::path::PathBuf;
 
-    const COMODO: &str = include_str!("../tests/fixtures/comodo-ecc.pem");
-    const NETLOCK: &str = include_str!("../tests/fixtures/netlock-arany.pem");
-    const MICROSEC: &str = include_str!("../tests/fixtures/microsec-2009.pem");
-    const PURPOSE_SHIPPED: &str = include_str!("../tests/fixtures/purpose-shipped.pem");
-    const PURPOSE_ADDED: &str = include_str!("../tests/fixtures/purpose-added.pem");
+    const COMODO: &str = include_str!("../../trust-core/tests/fixtures/comodo-ecc.pem");
+    const NETLOCK: &str = include_str!("../../trust-core/tests/fixtures/netlock-arany.pem");
+    const MICROSEC: &str = include_str!("../../trust-core/tests/fixtures/microsec-2009.pem");
+    const PURPOSE_SHIPPED: &str =
+        include_str!("../../trust-core/tests/fixtures/purpose-shipped.pem");
+    const PURPOSE_ADDED: &str = include_str!("../../trust-core/tests/fixtures/purpose-added.pem");
 
     fn purpose_addition(purposes: &[&str]) -> Addition {
         Addition {
@@ -578,6 +622,35 @@ mod tests {
         path
     }
 
+    #[test]
+    fn replacing_a_bundle_preserves_an_unrelated_staging_link() {
+        let root = scratch("exclusive-staging");
+        fs::create_dir(&root).unwrap();
+        let destination = root.join("cert.pem");
+        let unrelated = root.join("unrelated");
+        fs::write(&unrelated, b"keep").unwrap();
+        std::os::unix::fs::symlink(&unrelated, destination.with_extension("tmp")).unwrap();
+        write_file(&destination, b"new bundle").unwrap();
+        assert_eq!(fs::read(&unrelated).unwrap(), b"keep");
+        assert_eq!(fs::read(&destination).unwrap(), b"new bundle");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_install_cleans_up_its_reserved_file() {
+        let root = scratch("staging-cleanup");
+        fs::create_dir(&root).unwrap();
+        let destination = root.join("directory");
+        fs::create_dir(&destination).unwrap();
+        assert!(write_file(&destination, b"cannot replace a directory").is_err());
+        let entries: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, ["directory"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn fallback_fixture(name: &str) -> (PathBuf, PathBuf, PathBuf) {
         let root = scratch(name);
         let staging = root.join("certs.new");
@@ -698,7 +771,7 @@ mod tests {
                 ));
             }
             if from == previous {
-                return Err(io::Error::new(ErrorKind::Other, "restore blocked"));
+                return Err(io::Error::other("restore blocked"));
             }
             fs::rename(from, to)
         })
@@ -761,8 +834,13 @@ mod tests {
 
         // Now distrust it and render again: the CApath entry must be gone,
         // or OpenSSL would keep trusting it through the directory.
-        let after =
-            store::compose(&shipped(), &[], &[victim.parsed.fingerprint.clone()], None).unwrap();
+        let after = store::compose(
+            &shipped(),
+            &[],
+            std::slice::from_ref(&victim.parsed.fingerprint),
+            None,
+        )
+        .unwrap();
         render(&root, &after, Compat::Files).unwrap();
         assert!(
             !hashed.exists(),

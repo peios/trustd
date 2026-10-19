@@ -16,18 +16,18 @@
 //! says that in its own words.
 
 use std::io::ErrorKind;
-use std::os::unix::net::UnixStream;
+mod channel;
 
-use libtrust::{
+use peios::access::AccessCheck;
+use peios::registry::{CreateFlags, Key, KeyAccess, OpenFlags, ValueType};
+use peios::security::{AccessMask, SecurityDescriptor};
+pub use trust_core::cert::{self, Details, Parsed};
+pub use trust_core::store::normalise_fingerprint;
+use trust_core::{
     ADD_KEY, CERTIFICATE_VALUE, CERTIFICATES_KEY, COMPAT_VALUE, CONTROL_SECURITY_VALUE,
     DISTRUST_KEY, PURPOSES_VALUE, Reply, Request, Root, SOCKET_PATH, Status, TRUST_CONTROL,
     TRUST_KEY,
 };
-use peios::access::AccessCheck;
-use peios::registry::{CreateFlags, Key, KeyAccess, OpenFlags, ValueType};
-use peios::security::{AccessMask, SecurityDescriptor};
-pub use trustd::cert::{self, Details, Parsed};
-pub use trustd::store::normalise_fingerprint;
 
 const ACCESS: KeyAccess = KeyAccess::QUERY_VALUE
     .union(KeyAccess::SET_VALUE)
@@ -75,14 +75,32 @@ fn registry_error(path: &str, error: peios::Error) -> Error {
 
 /// One request to trustd, and every reply it sends to it.
 pub fn call(request: &Request) -> Result<Vec<Reply>, Error> {
-    let mut stream = UnixStream::connect(SOCKET_PATH)
-        .map_err(|e| Error::Failed(format!("trustd is not reachable at {SOCKET_PATH}: {e}")))?;
-    libtrust::call(&mut stream, request).map_err(|e| Error::Failed(e.to_string()))
+    bounded_call(request).map_err(|error| Error::Failed(error.to_string()))
+}
+
+fn bounded_call(request: &Request) -> std::io::Result<Vec<Reply>> {
+    let end = channel::deadline(10_000)?;
+    let mut channel = channel::Channel::connect(SOCKET_PATH.as_bytes(), end)?;
+    channel.send(request, end)?;
+    let mut replies = Vec::new();
+    let mut bytes = 0usize;
+    loop {
+        let reply = channel.receive(end)?;
+        bytes = bytes
+            .checked_add(reply.encode().len())
+            .filter(|bytes| *bytes <= 16 * 1024 * 1024)
+            .ok_or_else(|| channel::invalid("trust snapshot exceeds 16 MiB"))?;
+        let more = matches!(reply, Reply::Roots { more: true, .. });
+        replies.push(reply);
+        if !more {
+            return Ok(replies);
+        }
+    }
 }
 
 /// Every root in force, with each certificate when `with_der`.
 pub fn roots(with_der: bool, purpose: Option<String>) -> Result<Vec<Root>, Error> {
-    libtrust::roots_of(call(&Request::Roots { with_der, purpose })?)
+    trust_core::roots_of(call(&Request::Roots { with_der, purpose })?)
         .map(|(_, roots)| roots)
         .map_err(Error::Failed)
 }
@@ -116,11 +134,11 @@ pub fn may_reload() -> bool {
                 .ok()
         })
         .and_then(|value| SecurityDescriptor::from_validated_bytes(value.data).ok());
-    let sd = configured.unwrap_or_else(libtrust::default_control_security);
+    let sd = configured.unwrap_or_else(trust_core::default_control_security);
     AccessCheck::new(
         &sd,
         AccessMask::from_bits_retain(TRUST_CONTROL),
-        libtrust::control_mapping(),
+        trust_core::control_mapping(),
     )
     .check()
     .map(|decision| decision.allowed)

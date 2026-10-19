@@ -40,7 +40,7 @@
 # survive a reboot, and the hook runs again every start.
 set -eu
 
-exec > /system/retc/prepare-store.log 2>&1
+exec >/system/retc/prepare-store.log 2>&1
 set -x
 
 TRUSTD_SID='S-1-5-80-158018673-1219163202-1628709498-2735078191-2367099888'
@@ -48,10 +48,10 @@ STORE=/system/retc/ssl
 
 mkdir -p "$STORE"
 sd allow --replace --flags CI,OI "$STORE" \
-  "S-1-5-18:f" \
-  "S-1-5-32-544:f" \
-  "S-1-1-0:rx" \
-  "$TRUSTD_SID:f"
+    "S-1-5-18:f" \
+    "S-1-5-32-544:f" \
+    "S-1-1-0:rx" \
+    "$TRUSTD_SID:f"
 sd show "$STORE"
 
 # Created after the stamp, so both inherit it. The renderer only ever

@@ -15,7 +15,7 @@ name = "trustd"
 path = "src/main.rs"
 
 [dependencies]
-libtrust = { path = "../libtrust" }
+trust-core = { path = "../trust-core" }
 libc = { workspace = true }
 peios = { workspace = true }
 # X.509 is a format read from untrusted-adjacent input (the shipped bundle

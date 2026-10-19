@@ -76,10 +76,10 @@ pub fn parse(der: &[u8], now: Option<i64>) -> Result<Parsed, Error> {
         .not_after
         .to_unix_duration()
         .as_secs() as i64;
-    if let Some(now) = now {
-        if not_after <= now {
-            return Err(Error::Expired);
-        }
+    if let Some(now) = now
+        && not_after <= now
+    {
+        return Err(Error::Expired);
     }
     let subject = certificate.tbs_certificate.subject.to_string();
     let subject_der = certificate
@@ -313,10 +313,10 @@ pub fn from_pem(text: &str) -> Vec<Vec<u8>> {
         if line == PEM_BEGIN {
             body = Some(String::new());
         } else if line == PEM_END {
-            if let Some(b) = body.take() {
-                if let Some(der) = base64_decode(&b) {
-                    out.push(der);
-                }
+            if let Some(b) = body.take()
+                && let Some(der) = base64_decode(&b)
+            {
+                out.push(der);
             }
         } else if let Some(b) = body.as_mut() {
             b.push_str(line);
@@ -458,11 +458,11 @@ fn canonical_name(name_der: &[u8]) -> Result<Vec<u8>, der::Error> {
 fn canonical_ava(ava: &[u8]) -> Result<Vec<u8>, der::Error> {
     let (tag, content, rest) = read_tlv(ava)?;
     if tag != 0x30 || !rest.is_empty() {
-        return Err(der::Tag::Sequence.value_error().into());
+        return Err(der::Tag::Sequence.value_error());
     }
     let (oid_tag, oid, after_oid) = read_tlv(content)?;
     if oid_tag != 0x06 {
-        return Err(der::Tag::Sequence.value_error().into());
+        return Err(der::Tag::Sequence.value_error());
     }
     let (value_tag, value, _) = read_tlv(after_oid)?;
     let mut body = tlv(0x06, oid);

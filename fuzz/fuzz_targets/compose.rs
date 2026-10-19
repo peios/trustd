@@ -10,8 +10,8 @@ use libfuzzer_sys::arbitrary::{self, Arbitrary};
 use libfuzzer_sys::fuzz_target;
 use trustd::store::{self, Addition};
 
-const REAL: &str = include_str!("../../trustd/tests/fixtures/comodo-ecc.pem");
-const REAL2: &str = include_str!("../../trustd/tests/fixtures/netlock-arany.pem");
+const REAL: &str = include_str!("../../trust-core/tests/fixtures/comodo-ecc.pem");
+const REAL2: &str = include_str!("../../trust-core/tests/fixtures/netlock-arany.pem");
 
 #[derive(Arbitrary, Debug)]
 struct Input {
@@ -35,7 +35,11 @@ fuzz_target!(|input: Input| {
         .additions
         .into_iter()
         .take(16)
-        .map(|(name, der)| Addition { name, der, purposes: vec![] })
+        .map(|(name, der)| Addition {
+            name,
+            der,
+            purposes: vec![],
+        })
         .collect();
 
     let Ok(composed) = store::compose(&bundle, &additions, &input.distrust, input.now) else {
@@ -44,18 +48,37 @@ fuzz_target!(|input: Input| {
     // A successful composition is never empty, and never contains anything
     // that was distrusted.
     assert!(!composed.roots.is_empty());
-    let distrust: Vec<String> = input.distrust.iter().map(|f| store::normalise_fingerprint(f)).collect();
+    let distrust: Vec<String> = input
+        .distrust
+        .iter()
+        .map(|f| store::normalise_fingerprint(f))
+        .collect();
     for root in &composed.roots {
-        assert!(!distrust.contains(&root.parsed.fingerprint), "a distrusted root survived");
+        assert!(
+            !distrust.contains(&root.parsed.fingerprint),
+            "a distrusted root survived"
+        );
     }
     // Deterministic, so an unchanged store rewrites nothing.
     let again = store::compose(&bundle, &additions, &input.distrust, input.now).unwrap();
     assert_eq!(
-        composed.roots.iter().map(|r| &r.parsed.fingerprint).collect::<Vec<_>>(),
-        again.roots.iter().map(|r| &r.parsed.fingerprint).collect::<Vec<_>>()
+        composed
+            .roots
+            .iter()
+            .map(|r| &r.parsed.fingerprint)
+            .collect::<Vec<_>>(),
+        again
+            .roots
+            .iter()
+            .map(|r| &r.parsed.fingerprint)
+            .collect::<Vec<_>>()
     );
     // No duplicates: a bundle repeated many times is still one store.
-    let mut seen: Vec<&String> = composed.roots.iter().map(|r| &r.parsed.fingerprint).collect();
+    let mut seen: Vec<&String> = composed
+        .roots
+        .iter()
+        .map(|r| &r.parsed.fingerprint)
+        .collect();
     let before = seen.len();
     seen.sort();
     seen.dedup();

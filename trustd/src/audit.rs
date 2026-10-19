@@ -174,13 +174,13 @@ mod tests {
     use super::*;
     use crate::cert;
     use crate::store::{Addition, MINIMUM_SHIPPED, compose};
-    use libtrust::Source;
     use peios::msgpack::{Reader, Type};
     use std::collections::BTreeMap;
+    use trust_core::Source;
 
-    const COMODO: &str = include_str!("../tests/fixtures/comodo-ecc.pem");
-    const NETLOCK: &str = include_str!("../tests/fixtures/netlock-arany.pem");
-    const MICROSEC: &str = include_str!("../tests/fixtures/microsec-2009.pem");
+    const COMODO: &str = include_str!("../../trust-core/tests/fixtures/comodo-ecc.pem");
+    const NETLOCK: &str = include_str!("../../trust-core/tests/fixtures/netlock-arany.pem");
+    const MICROSEC: &str = include_str!("../../trust-core/tests/fixtures/microsec-2009.pem");
 
     fn bundle(parts: &[&str]) -> String {
         let mut text = String::new();
@@ -243,8 +243,8 @@ mod tests {
         let shipped = bundle(&[COMODO, NETLOCK, MICROSEC]);
         let before = compose(&shipped, &[], &[], None).unwrap();
         let pasted = fingerprint_of(NETLOCK).to_uppercase();
-        let after = compose(&shipped, &[], &[pasted.clone()], None).unwrap();
-        let found = changes(&before.roots, &after.roots, &[pasted.clone()]);
+        let after = compose(&shipped, &[], std::slice::from_ref(&pasted), None).unwrap();
+        let found = changes(&before.roots, &after.roots, std::slice::from_ref(&pasted));
         assert_eq!(
             kinds(&found),
             vec![(Change::Distrusted, fingerprint_of(NETLOCK))]

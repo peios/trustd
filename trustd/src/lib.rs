@@ -1,5 +1,5 @@
 pub mod audit;
-pub mod cert;
+pub use trust_core::cert;
 pub mod log;
 pub mod render;
-pub mod store;
+pub use trust_core::store;
