@@ -1,0 +1,22 @@
+{
+    "package": {
+        "name": "dev.peios.libtrust",
+        "version": "0.1.6-1",
+        "architecture": "x86_64",
+        "license_class": "free",
+        "description": "Shared client and configuration API for trustd",
+        "homepage": "https://github.com/peios/trustd"
+    },
+    "license_component": "libtrust",
+    "dependencies": {
+        "org.gnu.glibc": "*",
+        "org.gnu.gcc-libgcc": "*",
+        "dev.peios.libpeios": ">= 0.5.12-1"
+    },
+    "files": {
+        "source:LICENSE": "usr/share/licenses/dev.peios.libtrust/LICENSE",
+        "stage:licenses/libtrust/**": "usr/share/licenses/dev.peios.libtrust/third-party",
+        "stage:usr/lib/x86_64-linux-peios/libtrust.so.1": "usr/lib/x86_64-linux-peios/libtrust.so.1"
+    },
+    "executables": ["usr/lib/x86_64-linux-peios/libtrust.so.1"]
+}

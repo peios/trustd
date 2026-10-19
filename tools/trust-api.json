@@ -1,0 +1,194 @@
+{
+  "name": "trust",
+  "types": {
+    "Root": {
+      "rust": "trust_core::Root",
+      "fields": [
+        [
+          "fingerprint",
+          "String"
+        ],
+        [
+          "subject",
+          "String"
+        ],
+        [
+          "purposes",
+          "Vec<String>"
+        ],
+        [
+          "source",
+          "Source"
+        ],
+        [
+          "name",
+          "Option<String>"
+        ],
+        [
+          "not_after",
+          "i64"
+        ],
+        [
+          "der",
+          "Vec<u8>"
+        ]
+      ]
+    },
+    "Status": {
+      "rust": "trust_core::Status",
+      "fields": [
+        [
+          "generation",
+          "u64"
+        ],
+        [
+          "health",
+          "Health"
+        ],
+        [
+          "message",
+          "Option<String>"
+        ],
+        [
+          "shipped",
+          "u64"
+        ],
+        [
+          "added",
+          "u64"
+        ],
+        [
+          "distrusted",
+          "u64"
+        ],
+        [
+          "skipped",
+          "u64"
+        ],
+        [
+          "effective",
+          "u64"
+        ],
+        [
+          "compat_mode",
+          "u32"
+        ],
+        [
+          "rendered",
+          "Vec<String>"
+        ]
+      ]
+    },
+    "Parsed": {
+      "rust": "trust_core::cert::Parsed",
+      "fields": [
+        [
+          "der",
+          "Vec<u8>"
+        ],
+        [
+          "fingerprint",
+          "String"
+        ],
+        [
+          "subject",
+          "String"
+        ],
+        [
+          "not_after",
+          "i64"
+        ],
+        [
+          "subject_hash",
+          "String"
+        ]
+      ]
+    },
+    "Details": {
+      "rust": "trust_core::cert::Details",
+      "fields": [
+        [
+          "common_name",
+          "Option<String>"
+        ],
+        [
+          "organisation",
+          "Option<String>"
+        ],
+        [
+          "unit",
+          "Option<String>"
+        ],
+        [
+          "country",
+          "Option<String>"
+        ],
+        [
+          "subject",
+          "String"
+        ],
+        [
+          "issuer",
+          "String"
+        ],
+        [
+          "serial",
+          "String"
+        ],
+        [
+          "not_before",
+          "i64"
+        ],
+        [
+          "not_after",
+          "i64"
+        ],
+        [
+          "key",
+          "String"
+        ],
+        [
+          "ca",
+          "bool"
+        ]
+      ]
+    },
+    "Distrusted": {
+      "rust": "trust_client_core::Distrusted",
+      "fields": [
+        [
+          "fingerprint",
+          "String"
+        ],
+        [
+          "reason",
+          "String"
+        ]
+      ]
+    }
+  },
+  "enums": {
+    "Source": [
+      "Shipped",
+      "Added"
+    ],
+    "Request": [
+      "Status",
+      "Reload"
+    ],
+    "Health": [
+      "Ok",
+      "Degraded"
+    ]
+  },
+  "outputs": [
+    "Text",
+    "Bytes",
+    "Boolean",
+    "RootList",
+    "Status",
+    "Parsed",
+    "Details",
+    "DistrustedList"
+  ]
+}

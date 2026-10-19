@@ -1,0 +1,25 @@
+{
+    "side_effects": ["man-db"],
+    "package": {
+        "name": "dev.peios.trust",
+        "description": "Operator command for the Peios machine trust store",
+        "version": "0.1.6-1",
+        "architecture": "x86_64",
+        "license_class": "free",
+        "homepage": "https://github.com/peios/trustd"
+    },
+    "dependencies": {
+        "dev.peios.libpeios": ">= 0.5.12-1",
+        "org.gnu.glibc": "*",
+        "org.gnu.gcc-libgcc": "*",
+        "dev.peios.libtrust": "= 0.1.6-1"
+    },
+    "files": {
+        "source:LICENSE": "usr/share/licenses/dev.peios.trust/LICENSE",
+        "stage:licenses/trust/**": "usr/share/licenses/dev.peios.trust/third-party",
+        "stage:usr/bin/trust": "usr/bin/trust",
+        "stage:usr/share/man/man1/trust.1.gz": "usr/share/man/man1/trust.1.gz"
+    },
+    "license_component": "trust",
+    "executables": ["usr/bin/trust"]
+}

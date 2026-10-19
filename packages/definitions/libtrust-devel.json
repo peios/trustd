@@ -1,0 +1,24 @@
+{
+    "package": {
+        "name": "dev.peios.libtrust-devel",
+        "version": "0.1.6-1",
+        "architecture": "x86_64",
+        "license_class": "free",
+        "description": "C headers and linker metadata for libtrust",
+        "homepage": "https://github.com/peios/trustd"
+    },
+    "license_component": "libtrust",
+    "dependencies": {
+        "dev.peios.libtrust": "= 0.1.6-1"
+    },
+    "files": {
+        "source:LICENSE": "usr/share/licenses/dev.peios.libtrust-devel/LICENSE",
+        "stage:licenses/libtrust/**": "usr/share/licenses/dev.peios.libtrust-devel/third-party",
+        "stage:usr/include/**": "usr/include",
+        "stage:usr/lib/x86_64-linux-peios/libtrust.so": "usr/lib/x86_64-linux-peios/libtrust.so",
+        "stage:usr/lib/x86_64-linux-peios/pkgconfig/trust.pc": "usr/lib/x86_64-linux-peios/pkgconfig/trust.pc",
+        "stage:usr/share/man/man3/libtrust.3.gz": "usr/share/man/man3/libtrust.3.gz"
+    },
+    "executables": [],
+    "side_effects": ["man-db"]
+}

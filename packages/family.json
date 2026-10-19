@@ -1,0 +1,20 @@
+{
+    "name": "trustd",
+    "client": "trust",
+    "api": "trust",
+    "library": "libtrust",
+    "version": "0.1.6",
+    "destinations": {
+        "trustd": "usr/sbin/trustd",
+        "trust": "usr/bin/trust",
+        "libtrust": "usr/lib/x86_64-linux-peios/libtrust.so.1"
+    },
+    "sonames": {
+        "libtrust": "libtrust.so.1"
+    },
+    "needed": {
+        "trust": ["libtrust.so.1"],
+        "trustd": ["libpeios.so.0"],
+        "libtrust": ["libpeios.so.0"]
+    }
+}

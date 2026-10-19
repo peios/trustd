@@ -4,3 +4,10 @@
 /fuzz/target
 /fuzz/artifacts
 /fuzz/corpus
+
+/bazel-*
+/.bazel-vendor
+/.build
+.trail-cache/
+__pycache__/
+*.pyc

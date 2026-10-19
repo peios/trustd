@@ -1,0 +1,21 @@
+{
+    "package": {
+        "name": "dev.peios.trustd-debugsource",
+        "architecture": "x86_64",
+        "description": "Debug sources for the Peios trust service and client",
+        "version": "0.1.6-1",
+        "license_class": "free",
+        "homepage": "https://github.com/peios/trustd"
+    },
+    "dependencies": {
+        "dev.peios.trustd-debuginfo": "= 0.1.6-1",
+        "dev.peios.trust-debuginfo": "= 0.1.6-1"
+    },
+    "files": {
+        "source:LICENSE": "usr/share/licenses/dev.peios.trustd-debugsource/LICENSE",
+        "stage:licenses/debugsource/**": "usr/share/licenses/dev.peios.trustd-debugsource/third-party",
+        "stage:usr/src/debug/**": "usr/src/debug"
+    },
+    "license_component": "debugsource",
+    "executables": []
+}
