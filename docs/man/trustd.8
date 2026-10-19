@@ -65,3 +65,8 @@ Output from the privileged directory preparation hook.
 .SH SEE ALSO
 .BR trust (1),
 .BR reg (1)
+
+.SH REPLY DEADLINE
+A control reply has one five-second write deadline, shared by all root-list
+chunks. If the peer stops reading, the connection is closed when this budget
+expires. A client must reject an incomplete snapshot.
