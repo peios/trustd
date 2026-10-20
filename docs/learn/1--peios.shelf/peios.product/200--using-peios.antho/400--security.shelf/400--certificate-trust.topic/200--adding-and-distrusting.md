@@ -3,9 +3,9 @@ title: Adding and Distrusting Certificates
 type: how-to
 description: Record a trust decision and verify its effective result.
 related:
-  - peios/trust/overview
-  - peios/trust/the-trust-command
-  - peios/trust/the-compat-files
+  - peios/certificate-trust/overview
+  - peios/certificate-trust/the-trust-command
+  - peios/certificate-trust/the-compat-files
 ---
 
 Add a certificate authority when the machine needs to trust an authority

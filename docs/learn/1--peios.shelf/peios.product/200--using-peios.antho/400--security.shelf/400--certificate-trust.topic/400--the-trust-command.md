@@ -3,9 +3,9 @@ title: Understanding Trust Status
 type: concept
 description: Distinguish stored trust decisions from effective and cached roots.
 related:
-  - peios/trust/overview
-  - peios/trust/adding-and-distrusting
-  - peios/trust/the-compat-files
+  - peios/certificate-trust/overview
+  - peios/certificate-trust/adding-and-distrusting
+  - peios/certificate-trust/the-compat-files
 ---
 
 `trust` reads the effective store from trustd and records policy changes in

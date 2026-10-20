@@ -3,10 +3,10 @@ title: The Trust Store
 type: concept
 description: How trustd combines shipped roots with local trust decisions.
 related:
-  - peios/trust/the-trust-command
-  - peios/trust/adding-and-distrusting
-  - peios/trust/the-compat-files
-  - peios/using-peios/registry-tools/regman
+  - peios/certificate-trust/the-trust-command
+  - peios/certificate-trust/adding-and-distrusting
+  - peios/certificate-trust/the-compat-files
+  - peios/using-peios/registry/regman
 ---
 
 trustd supplies the machine's trusted certificate authorities. It combines
@@ -29,7 +29,7 @@ publication from the registry alone.
 
 `trust list --distrusted` reads durable registry decisions. It does not prove
 that the daemon has applied them. See
-[Adding and Distrusting Certificates](~peios/trust/adding-and-distrusting)
+[Adding and Distrusting Certificates](~peios/certificate-trust/adding-and-distrusting)
 for changes and verification.
 
 <!-- Preserve the published heading anchor. -->
@@ -70,7 +70,7 @@ a notification does not itself invalidate an application's existing sessions.
 Compatibility consumers read generated bundles or a hashed directory under
 `/etc/ssl`. Those outputs contain roots permitted for `ServerAuth`.
 They are derived from policy, so editing them does not make a lasting change.
-See [The Compatibility Trust Files](~peios/trust/the-compat-files).
+See [The Compatibility Trust Files](~peios/certificate-trust/the-compat-files).
 
 Installing a root bundle alone does not compose or render the machine store.
 Likewise, stopping trustd does not remove an existing rendered bundle or
@@ -88,4 +88,4 @@ A rendering failure can leave different consumers using different sets.
 Inspect the failure and verify both the service and the paths used by the
 affected application. See
 [When the Store Is
-Degraded](~peios/trust/adding-and-distrusting#when-the-store-is-degraded).
+Degraded](~peios/certificate-trust/adding-and-distrusting#when-the-store-is-degraded).

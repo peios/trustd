@@ -3,8 +3,8 @@ title: The Compatibility Trust Files
 type: concept
 description: How trustd supplies file-based trust and what rendering failures mean.
 related:
-  - peios/trust/overview
-  - peios/trust/adding-and-distrusting
+  - peios/certificate-trust/overview
+  - peios/certificate-trust/adding-and-distrusting
 ---
 
 trustd renders certificate files for programs that obtain machine trust from
@@ -40,7 +40,7 @@ the socket and every file. A failure can therefore leave consumers observing
 different generations.
 
 Follow [degraded-store
-recovery](~peios/trust/adding-and-distrusting#when-the-store-is-degraded)
+recovery](~peios/certificate-trust/adding-and-distrusting#when-the-store-is-degraded)
 and check the actual paths used by the application. A previously reported
 rendered path is not proof of its contents after a failed refresh.
 
