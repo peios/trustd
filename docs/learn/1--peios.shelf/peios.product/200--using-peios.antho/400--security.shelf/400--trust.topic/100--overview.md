@@ -6,7 +6,7 @@ related:
   - peios/trust/the-trust-command
   - peios/trust/adding-and-distrusting
   - peios/trust/the-compat-files
-  - peios/using-peios/peiosutils/registry-tools/regman
+  - peios/using-peios/registry-tools/regman
 ---
 
 trustd supplies the machine's trusted certificate authorities. It combines

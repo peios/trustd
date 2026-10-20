@@ -1,6 +1,6 @@
 [
-    "trail: warning: /peios/using-peios/events/trustd/trustd-root-added: link '~peios/reading-records/stored-records' matches no page in product 'peios'",
-    "trail: warning: /peios/using-peios/events/trustd/trustd-root-distrusted: link '~peios/reading-records/stored-records' matches no page in product 'peios'",
-    "trail: warning: /peios/using-peios/events/trustd/trustd-root-removed: link '~peios/reading-records/stored-records' matches no page in product 'peios'",
-    "trail: warning: /peios/using-peios/trust/overview: related link: link '~peios/using-peios/peiosutils/registry-tools/regman' matches no page in product 'peios'"
+  "trail: warning: /peios/reference/events/trustd/trustd-root-added: link '~peios/reading-records/stored-records' matches no page in product 'peios'",
+  "trail: warning: /peios/reference/events/trustd/trustd-root-distrusted: link '~peios/reading-records/stored-records' matches no page in product 'peios'",
+  "trail: warning: /peios/reference/events/trustd/trustd-root-removed: link '~peios/reading-records/stored-records' matches no page in product 'peios'",
+  "trail: warning: /peios/using-peios/trust/overview: related link: link '~peios/using-peios/registry-tools/regman' matches no page in product 'peios'"
 ]
