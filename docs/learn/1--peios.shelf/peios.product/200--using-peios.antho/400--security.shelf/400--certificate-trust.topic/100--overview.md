@@ -34,7 +34,7 @@ that the daemon has applied them. See
 for changes and verification.
 
 <!-- Preserve the published heading anchor. -->
-<!-- lint-disable-next-line words -->
+<!-- lint-disable-next-line spelling -->
 ## Who can change it {#who-may-change-it}
 
 The security descriptors on `Machine\System\Trust\Certificates` and its

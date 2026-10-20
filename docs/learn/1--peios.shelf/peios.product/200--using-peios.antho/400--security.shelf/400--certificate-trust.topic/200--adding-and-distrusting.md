@@ -109,7 +109,7 @@ an entry without that value so that the other metadata can be prepared
 first. Use the regman schema rather than inferring value types from examples.
 
 <!-- Preserve the published heading anchor. -->
-<!-- lint-disable-next-line words -->
+<!-- lint-disable-next-line spelling -->
 ## Package-provided trust {#packages-may-offer-trust-never-take-it}
 
 Package-provided trust decisions belong in inert registry seeds. Installing
