@@ -46,7 +46,7 @@ rendered path is not proof of its contents after a failed refresh.
 
 ## Turning them off
 
-`MachineSystemTrust GenerateLinuxTrustFiles` selects whether trustd supplies
+`Machine\System\Trust GenerateLinuxTrustFiles` selects whether trustd supplies
 compatibility files. Its regman entry owns the value reference.
 
 Turning file output off removes trust inputs from programs that require

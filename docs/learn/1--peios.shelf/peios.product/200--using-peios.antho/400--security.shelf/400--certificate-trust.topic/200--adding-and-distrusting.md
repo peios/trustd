@@ -16,12 +16,12 @@ package or local addition supplies it.
 
 - Install and start trustd and the `trust` command.
 - Obtain write access to the relevant keys under
-  `MachineSystemTrustCertificates`.
+  `Machine\System\Trust\Certificates`.
 - Verify the intended certificate's fingerprint through a trusted channel.
 - Identify the applications affected by the change and how they obtain trust.
 
 `trust(1)` owns command syntax. The regman entry for
-`MachineSystemTrustCertificates` owns the registry schema.
+`Machine\System\Trust\Certificates` owns the registry schema.
 
 ## In Security Policy
 
