@@ -5,10 +5,11 @@
 //! stated lengths. Inputs are borrowed for the call only. Result views remain
 //! borrowed until their owning result is freed. Handles must originate from
 //! this library. Mutation and destruction require exclusive access.
+use std::fmt;
 use std::io;
 use std::ptr;
 use trust_abi as abi;
-use trust_core::{Reply, Request};
+use trust_core::{Reply, Request, cert};
 mod channel;
 mod inputs;
 mod views;
@@ -25,11 +26,54 @@ enum Payload {
     Parsed(abi::Parsed),
     Details(abi::Details),
     DistrustedList(abi::DistrustedList),
+    ByteList(abi::Strings),
+}
+
+// The kinds of failure a result reports, as `trust-api.json`'s `Failure`
+// numbers them: the header's `PEIOS_TRUST_FAILURE_*`.
+const FAILURE_NONE: u32 = 0;
+const FAILURE_OTHER: u32 = 1;
+const FAILURE_DENIED: u32 = 2;
+const FAILURE_NOT_FOUND: u32 = 3;
+const FAILURE_MALFORMED: u32 = 4;
+const FAILURE_NOT_A_CA: u32 = 5;
+const FAILURE_EXPIRED: u32 = 6;
+const FAILURE_NO_CERTIFICATE: u32 = 7;
+
+/// A failure that says which kind it is, carried inside an `io::Error` to
+/// the result that reports it.
+#[derive(Debug)]
+struct Kinded {
+    failure: u32,
+    message: String,
+}
+impl fmt::Display for Kinded {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.message.fmt(out)
+    }
+}
+impl std::error::Error for Kinded {}
+
+/// `message` as an `io::Error` of `kind`, reported as the failure `failure`.
+fn kinded(kind: io::ErrorKind, failure: u32, message: String) -> io::Error {
+    io::Error::new(kind, Kinded { failure, message })
+}
+
+/// Why a certificate was refused, as an `io::Error` whose result says so.
+fn cert_error(error: cert::Error) -> io::Error {
+    let failure = match &error {
+        cert::Error::Malformed(_) => FAILURE_MALFORMED,
+        cert::Error::NotACa => FAILURE_NOT_A_CA,
+        cert::Error::Expired => FAILURE_EXPIRED,
+        cert::Error::NoCertificate => FAILURE_NO_CERTIFICATE,
+    };
+    kinded(io::ErrorKind::InvalidData, failure, error.to_string())
 }
 /// Immutable result and storage for every view returned from it.
 pub struct ResultHandle {
     generation: u64,
     error: i32,
+    failure: u32,
     message: abi::Bytes,
     arena: Arena,
     payload: Payload,
@@ -39,6 +83,7 @@ impl Default for ResultHandle {
         Self {
             generation: 0,
             error: 0,
+            failure: FAILURE_NONE,
             message: views::absent(),
             arena: Arena::default(),
             payload: Payload::Empty,
@@ -56,6 +101,17 @@ impl ResultHandle {
             io::ErrorKind::NotFound => libc::ENOENT,
             _ => libc::EIO,
         });
+        result.failure = match error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<Kinded>())
+        {
+            Some(kinded) => kinded.failure,
+            None => match error.kind() {
+                io::ErrorKind::PermissionDenied => FAILURE_DENIED,
+                io::ErrorKind::NotFound => FAILURE_NOT_FOUND,
+                _ => FAILURE_OTHER,
+            },
+        };
         result.message = result.arena.text(&error.to_string());
         result
     }
@@ -85,6 +141,15 @@ pub unsafe extern "C" fn peios_trust_result_free(result: *mut ResultHandle) {
 pub unsafe extern "C" fn peios_trust_result_error(result: *const ResultHandle) -> i32 {
     // SAFETY: caller supplies a live borrowed result or null.
     unsafe { result.as_ref() }.map_or(libc::EINVAL, |result| result.error)
+}
+/// Return the kind of failure, `PEIOS_TRUST_FAILURE_*`: none on success,
+/// and other for null, as its error is EINVAL.
+/// # Safety
+/// A non-null result must remain alive and readable for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_result_failure(result: *const ResultHandle) -> u32 {
+    // SAFETY: caller supplies a live borrowed result or null.
+    unsafe { result.as_ref() }.map_or(FAILURE_OTHER, |result| result.failure)
 }
 /// Return a diagnostic borrowed from result; null produces an absent span.
 /// # Safety
@@ -178,6 +243,20 @@ pub unsafe extern "C" fn peios_trust_result_root_list(
     // SAFETY: the caller borrows a live result or supplies null.
     match unsafe { result.as_ref() }.map(|result| &result.payload) {
         Some(Payload::RootList(view)) => view,
+        _ => ptr::null(),
+    }
+}
+/// Return a borrowed list of byte strings, certificates' DER, or null for a
+/// different payload.
+/// # Safety
+/// A non-null result must remain alive for this call and use of its view.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_result_byte_list(
+    result: *const ResultHandle,
+) -> *const abi::Strings {
+    // SAFETY: the caller borrows a live result or supplies null.
+    match unsafe { result.as_ref() }.map(|result| &result.payload) {
+        Some(Payload::ByteList(view)) => view,
         _ => ptr::null(),
     }
 }
@@ -329,12 +408,12 @@ pub unsafe extern "C" fn peios_trust_reload(
     })())
 }
 fn management_error(error: trust_client_core::Error) -> io::Error {
-    let kind = match &error {
-        trust_client_core::Error::Denied(_) => io::ErrorKind::PermissionDenied,
-        trust_client_core::Error::NotFound(_) => io::ErrorKind::NotFound,
-        _ => io::ErrorKind::Other,
+    let (kind, failure) = match &error {
+        trust_client_core::Error::Denied(_) => (io::ErrorKind::PermissionDenied, FAILURE_DENIED),
+        trust_client_core::Error::NotFound(_) => (io::ErrorKind::NotFound, FAILURE_NOT_FOUND),
+        trust_client_core::Error::Failed(_) => (io::ErrorKind::Other, FAILURE_OTHER),
     };
-    io::Error::new(kind, error)
+    kinded(kind, failure, error.to_string())
 }
 /// Decode exactly one PEM or DER certificate.
 /// # Safety
@@ -364,8 +443,7 @@ pub unsafe extern "C" fn peios_trust_inspect(der: abi::Bytes) -> *mut ResultHand
     finish((|| {
         // SAFETY: the caller guarantees every input span is live for this call.
         unsafe {
-            let value = trust_core::cert::describe(inputs::bytes(der)?)
-                .map_err(|error| invalid(error.to_string()))?;
+            let value = cert::describe(inputs::bytes(der)?).map_err(cert_error)?;
             let mut result = ResultHandle::default();
             result.payload = Payload::Details(result.arena.details(&value));
             Ok(result)
@@ -380,8 +458,7 @@ pub unsafe extern "C" fn peios_trust_vet(der: abi::Bytes) -> *mut ResultHandle {
     finish((|| {
         // SAFETY: the caller guarantees every input span is live for this call.
         unsafe {
-            let value = trust_client_core::vet(inputs::bytes(der)?)
-                .map_err(|error| invalid(error.to_string()))?;
+            let value = trust_client_core::vet(inputs::bytes(der)?).map_err(cert_error)?;
             let mut result = ResultHandle::default();
             result.payload = Payload::Parsed(result.arena.parsed(&value));
             Ok(result)
@@ -628,4 +705,86 @@ pub unsafe extern "C" fn peios_trust_resolve(argument: abi::Bytes) -> *mut Resul
         result.payload = Payload::Text(result.arena.text(&value));
         Ok(result)
     })())
+}
+
+/// A text result of `value`.
+fn text_result(value: &str) -> ResultHandle {
+    let mut result = ResultHandle::default();
+    result.payload = Payload::Text(result.arena.text(value));
+    result
+}
+/// Return a certificate's SHA-256 fingerprint, lowercase hex, without parsing it.
+/// # Safety
+/// All spans and handles must obey the module's borrowed input contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_fingerprint(der: abi::Bytes) -> *mut ResultHandle {
+    finish((|| {
+        // SAFETY: the caller guarantees every input span is live for this call.
+        let der = unsafe { inputs::bytes(der)? };
+        Ok(text_result(&cert::fingerprint(der)))
+    })())
+}
+/// Return a certificate's DER as one PEM block of 64 columns.
+/// # Safety
+/// All spans and handles must obey the module's borrowed input contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_to_pem(der: abi::Bytes) -> *mut ResultHandle {
+    finish((|| {
+        // SAFETY: the caller guarantees every input span is live for this call.
+        let der = unsafe { inputs::bytes(der)? };
+        Ok(text_result(&cert::to_pem(der)))
+    })())
+}
+/// Return the DER of every CERTIFICATE block of a PEM document, in order;
+/// other blocks and text are ignored.
+/// # Safety
+/// All spans and handles must obey the module's borrowed input contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_from_pem(text: abi::Bytes) -> *mut ResultHandle {
+    finish((|| {
+        // SAFETY: the caller guarantees every input span is live for this call.
+        let text = unsafe { inputs::text(text)? };
+        let mut result = ResultHandle::default();
+        result.payload = Payload::ByteList(result.arena.byte_list(&cert::from_pem(text)));
+        Ok(result)
+    })())
+}
+/// Return a fingerprint as compared: lowercase, separators removed.
+/// # Safety
+/// All spans and handles must obey the module's borrowed input contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_normalise_fingerprint(text: abi::Bytes) -> *mut ResultHandle {
+    finish((|| {
+        // SAFETY: the caller guarantees every input span is live for this call.
+        let text = unsafe { inputs::text(text)? };
+        Ok(text_result(&trust_core::store::normalise_fingerprint(text)))
+    })())
+}
+/// Resolve a whole fingerprint, or an unambiguous prefix of at least eight
+/// digits of one of `fingerprints`, without contacting trustd. No match is
+/// PEIOS_TRUST_FAILURE_NOT_FOUND.
+/// # Safety
+/// All spans and handles must obey the module's borrowed input contract.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn peios_trust_fingerprint_in(
+    text: abi::Bytes,
+    fingerprints: abi::Strings,
+) -> *mut ResultHandle {
+    finish((|| {
+        // SAFETY: the caller guarantees every input span is live for this call.
+        let (text, fingerprints) = unsafe { (inputs::text(text)?, inputs::strings(fingerprints)?) };
+        let fingerprints: Vec<&str> = fingerprints.iter().map(String::as_str).collect();
+        let value =
+            trust_client_core::fingerprint_among(text, &fingerprints).map_err(management_error)?;
+        Ok(text_result(&value))
+    })())
+}
+/// Return the control object's descriptor, self-relative, that trustd
+/// checks against when the ControlSecurity value is absent.
+#[unsafe(no_mangle)]
+pub extern "C" fn peios_trust_default_control_security() -> *mut ResultHandle {
+    let mut result = ResultHandle::default();
+    let descriptor = trust_core::default_control_security();
+    result.payload = Payload::Bytes(result.arena.bytes(descriptor.as_bytes()));
+    finish(Ok(result))
 }

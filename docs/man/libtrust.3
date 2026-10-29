@@ -11,8 +11,17 @@ The installed header defines the complete API, result views, and ownership rules
 Inputs are borrowed for a call. Results own their views until freed.
 Copy views before releasing their result.
 Mutable subscription handles require exclusive access.
+.PP
+Certificate helpers that need no daemon compute a fingerprint, convert
+between DER and PEM, normalize and resolve fingerprints against a given
+list, and return the default control security descriptor.
 .SH ERRORS
-Result errors are POSIX error numbers. Diagnostic text is intended for people.
+Result errors are POSIX error numbers.
+.BR peios_trust_result_failure ()
+returns the kind of failure, one of the
+.B PEIOS_TRUST_FAILURE_*
+constants: NONE, OTHER, DENIED, NOT_FOUND, MALFORMED, NOT_A_CA, EXPIRED or
+NO_CERTIFICATE. Both are stable. Diagnostic text is intended for people.
 A positive timeout in milliseconds covers connection, sending, and receiving.
 Operations are not replayed after uncertain I/O failures.
 .SH LINKING

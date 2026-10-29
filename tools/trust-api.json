@@ -179,6 +179,16 @@
     "Health": [
       "Ok",
       "Degraded"
+    ],
+    "Failure": [
+      "None",
+      "Other",
+      "Denied",
+      "NotFound",
+      "Malformed",
+      "NotACa",
+      "Expired",
+      "NoCertificate"
     ]
   },
   "outputs": [
@@ -189,6 +199,7 @@
     "Status",
     "Parsed",
     "Details",
-    "DistrustedList"
+    "DistrustedList",
+    "ByteList"
   ]
 }
