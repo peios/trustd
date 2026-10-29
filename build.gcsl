@@ -1,0 +1,60 @@
+# trustd's programs and its C client library, each crate compiled on its
+# own (see the rust library's `workspace`), for glibc.
+import "github.com/gcslib/clang"
+import "github.com/gcslib/rust"
+import "github.com/peios/peios-rs" as peios_rs
+
+# Where `trust-client`'s build script is told libtrust is.
+let LIBTRUST = "/opt/trust/lib"
+
+# The certificates trust-core's tests read, which trustd's and
+# trust-client's tests read too.
+let FIXTURES = [{at = "trust-core/tests/fixtures"; place = dir("trust-core/tests/fixtures")}]
+
+# The trustd workspace, planned. `trust-client` links the C client
+# library, libtrust, so it is given it.
+def crates() -> rust.RustWorkspace {
+    = planned([
+        {
+            package = "trust-client"
+            data = FIXTURES
+            env = [{key = "PEIOS_TRUST_LIB_DIR"; value = LIBTRUST}]
+            given = [{at = "{LIBTRUST}/libtrust.so"; place = build libtrust()}]
+        },
+    ])
+}
+
+# The workspace without `trust-client`'s settings, which libtrust is built
+# from: libtrust does not link itself.
+def unlinked() -> rust.RustWorkspace {
+    = planned([])
+}
+
+# The trustd workspace, planned, with `extra`, settings of further
+# packages. `peios-sys` binds libpeios with bindgen and links it, so it,
+# and every crate that depends on it, is given what peios-rs's library
+# says it needs: libpeios and its headers, built from the Peios SDK's own
+# files. trustd's tests read trust-core's certificates.
+fn planned(extra: List<rust.CrateSettings>) -> rust.RustWorkspace {
+    = rust.workspace(
+        dir("."),
+        rust.vendored(file("Cargo.lock")),
+        crates = [...peios_rs.crate_settings(), {package = "trustd"; data = FIXTURES}, ...extra],
+        libclang = [clang.libclang_18()],
+    )
+}
+
+# The certificate-store daemon.
+def build trustd() {
+    = rust.bin(crates(), "trustd")
+}
+
+# The operator command, a client of trustd's socket.
+def build trust() {
+    = rust.bin(crates(), "trust")
+}
+
+# The C client library, `libtrust.so.1` by its soname.
+def build libtrust() {
+    = rust.library(unlinked(), "libtrust")
+}
