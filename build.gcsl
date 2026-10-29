@@ -1,5 +1,13 @@
 # trustd's programs and its C client library, each crate compiled on its
 # own (see the rust library's `workspace`), for glibc.
+#
+# trustd is a library as well as a workspace: a workspace whose crates
+# depend on `trust-client` gives it libtrust, which it links, and gives its
+# programs libtrust when they run:
+#
+#     import "github.com/peios/trustd"
+#     rust.workspace(..., crates = [...peios_rs.crate_settings(), ...trustd.crate_settings()])
+#     rust.run_test(test, given = [...peios_rs.runtime(), ...trustd.runtime()], env = trustd.runtime_env())
 import "github.com/gcslib/clang"
 import "github.com/gcslib/rust"
 import "github.com/peios/peios-rs" as peios_rs
@@ -11,17 +19,40 @@ let LIBTRUST = "/opt/trust/lib"
 # trust-client's tests read too.
 let FIXTURES = [{at = "trust-core/tests/fixtures"; place = dir("trust-core/tests/fixtures")}]
 
+# The settings of `trust-client`: the C client library, libtrust, by its
+# link name, where its build script is told it is, for it and everything
+# that depends on it.
+def crate_settings() -> List<rust.CrateSettings> {
+    = [client_settings([])]
+}
+
+# What a program that links libtrust loads: libtrust, by its soname, where
+# `trust-client` links it from.
+def runtime() -> List<{at: String, place: Dir | File}> {
+    = [{at = "{LIBTRUST}/libtrust.so.1"; place = build libtrust()}]
+}
+
+# Where such a program finds libtrust, and libpeios, which it loads (see
+# peios-rs's `runtime_env`).
+def runtime_env() -> List<Entry<String>> {
+    = [{key = "LD_LIBRARY_PATH"; value = "/opt/peios/lib:{LIBTRUST}"}]
+}
+
+# `trust-client`'s settings, with `data` besides.
+fn client_settings(data: List<{at: String, place: Dir | File}>) -> rust.CrateSettings {
+    = {
+        package = "trust-client"
+        data = data
+        env = [{key = "PEIOS_TRUST_LIB_DIR"; value = LIBTRUST}]
+        given = [{at = "{LIBTRUST}/libtrust.so"; place = build libtrust()}]
+    }
+}
+
 # The trustd workspace, planned. `trust-client` links the C client
-# library, libtrust, so it is given it.
+# library, libtrust, so it is given it, and its tests trust-core's
+# certificates.
 def crates() -> rust.RustWorkspace {
-    = planned([
-        {
-            package = "trust-client"
-            data = FIXTURES
-            env = [{key = "PEIOS_TRUST_LIB_DIR"; value = LIBTRUST}]
-            given = [{at = "{LIBTRUST}/libtrust.so"; place = build libtrust()}]
-        },
-    ])
+    = planned([client_settings(FIXTURES)])
 }
 
 # The workspace without `trust-client`'s settings, which libtrust is built

@@ -18,13 +18,13 @@ let MEMBERS = ["libtrust", "trust-client", "trust-abi", "trust-core", "trust-cli
 let LIBTRUST = "/opt/trust/lib"
 
 # Where the tests find the shared libraries they load.
-let LIBRARIES = [{key = "LD_LIBRARY_PATH"; value = "/opt/peios/lib:{LIBTRUST}"}]
+let LIBRARIES = runtime_env()
 
 # What every test is given: libpeios, by its soname, which a program that
 # links it loads (see peios-rs's `runtime`), and libtrust, by its soname,
 # which `trust-client` loads.
 def loaded() -> List<{at: String, place: Dir | File}> {
-    = [...peios_rs.runtime(), {at = "{LIBTRUST}/libtrust.so.1"; place = build libtrust()}]
+    = [...peios_rs.runtime(), ...runtime()]
 }
 
 # Runs each of `tests`, given `given`.

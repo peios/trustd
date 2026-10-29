@@ -104,6 +104,25 @@ build whose `Cargo.lock` takes peios-rs's crates at another commit than
 built with always agree. The other Peios daemons take the same peios-rs
 commit.
 
+## Building against trustd
+
+trustd is a GCSL library as well as a workspace. A workspace whose crates
+depend on `trust-client` gives it libtrust, which it links, and gives its
+programs libtrust, and the libpeios it loads, when they run:
+
+```text
+import "github.com/peios/peios-rs" as peios_rs
+import "github.com/peios/trustd"
+
+rust.workspace(..., crates = [...peios_rs.crate_settings(), ...trustd.crate_settings()])
+rust.run_test(test, given = [...peios_rs.runtime(), ...trustd.runtime()], env = trustd.runtime_env())
+```
+
+`pekit lock` pins trustd's commit in the workspace's `pekit.lock`. The
+rust library fails a build whose `Cargo.lock` takes trustd's crates at
+another commit than that, so the crate and the libtrust it links always
+agree.
+
 ## Not built with pekit yet
 
 Packages and builds with the native Peios toolchain, which hardens
