@@ -26,6 +26,7 @@ use trust_core::{cert, store::normalise_fingerprint};
 fn failed_error(message: String) -> Error {
     Error {
         code: libc::EIO,
+        kind: trust_client::ErrorKind::Other,
         message,
     }
 }

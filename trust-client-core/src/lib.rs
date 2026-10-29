@@ -352,6 +352,12 @@ fn hex(text: &str) -> bool {
 /// An ambiguous prefix is refused rather than guessed at: distrusting the
 /// wrong certificate is not a mistake worth being convenient about.
 pub fn fingerprint_in(text: &str, roots: &[Root]) -> Result<String, Error> {
+    let fingerprints: Vec<&str> = roots.iter().map(|r| r.fingerprint.as_str()).collect();
+    fingerprint_among(text, &fingerprints)
+}
+
+/// [`fingerprint_in`], against the whole fingerprints `fingerprints`.
+pub fn fingerprint_among(text: &str, fingerprints: &[&str]) -> Result<String, Error> {
     let normalised = normalise_fingerprint(text);
     if !hex(&normalised) || normalised.len() > 64 {
         return Err(Error::Failed(format!(
@@ -366,12 +372,13 @@ pub fn fingerprint_in(text: &str, roots: &[Root]) -> Result<String, Error> {
             "{normalised} is too short; give at least eight digits"
         )));
     }
-    let matches: Vec<&Root> = roots
+    let matches: Vec<&str> = fingerprints
         .iter()
-        .filter(|r| r.fingerprint.starts_with(&normalised))
+        .copied()
+        .filter(|fingerprint| fingerprint.starts_with(&normalised))
         .collect();
     match matches.as_slice() {
-        [root] => Ok(root.fingerprint.clone()),
+        [fingerprint] => Ok((*fingerprint).to_owned()),
         [] => Err(Error::NotFound(format!(
             "no certificate in the store starts with {normalised} — give the whole fingerprint if you mean one the store does not have"
         ))),

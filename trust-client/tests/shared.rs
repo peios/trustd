@@ -162,3 +162,88 @@ fn certificate_details_cross_the_shared_boundary() {
     assert!(actual.ca);
     assert!(!actual.subject.is_empty());
 }
+#[test]
+fn a_refused_certificate_says_why_by_kind() {
+    let leaf = include_bytes!("../../trust-core/tests/fixtures/leaf.pem");
+    let leaf = trust_client::certificate(leaf, "leaf").unwrap();
+    let refused = trust_client::vet(&leaf).unwrap_err();
+    assert_eq!(refused.kind, trust_client::ErrorKind::NotACa);
+    assert_eq!(refused.code, libc::EINVAL);
+    let expired = include_bytes!("../../trust-core/tests/fixtures/expired-ca.pem");
+    let expired = trust_client::certificate(expired, "expired").unwrap();
+    assert_eq!(
+        trust_client::vet(&expired).unwrap_err().kind,
+        trust_client::ErrorKind::Expired
+    );
+    assert_eq!(
+        trust_client::vet(b"not a certificate").unwrap_err().kind,
+        trust_client::ErrorKind::Malformed
+    );
+    assert_eq!(
+        trust_client::inspect(b"not a certificate")
+            .unwrap_err()
+            .kind,
+        trust_client::ErrorKind::Malformed
+    );
+    let ca = include_bytes!("../../trust-core/tests/fixtures/comodo-ecc.pem");
+    let ca = trust_client::certificate(ca, "ca").unwrap();
+    assert!(trust_client::vet(&ca).is_ok());
+}
+#[test]
+fn certificates_cross_as_pem_and_fingerprints_as_the_core_makes_them() {
+    let pem = include_str!("../../trust-core/tests/fixtures/comodo-ecc.pem");
+    let der = trust_client::certificate(pem.as_bytes(), "fixture").unwrap();
+    assert_eq!(
+        trust_client::fingerprint(&der).unwrap(),
+        trust_core::cert::fingerprint(&der)
+    );
+    let written = trust_client::to_pem(&der).unwrap();
+    assert_eq!(written, trust_core::cert::to_pem(&der));
+    let bundle = format!(
+        "# a comment the shipped bundle has\n{written}{}",
+        include_str!("../../trust-core/tests/fixtures/netlock-arany.pem")
+    );
+    let read = trust_client::from_pem(&bundle).unwrap();
+    assert_eq!(read.len(), 2);
+    assert_eq!(read[0], der);
+    assert!(trust_client::from_pem("no blocks").unwrap().is_empty());
+}
+#[test]
+fn a_fingerprint_prefix_resolves_against_the_roots_given() {
+    let root = |fingerprint: &str| trust_core::Root {
+        fingerprint: fingerprint.into(),
+        ..Default::default()
+    };
+    let a = format!("018e13f0{}", "a".repeat(56));
+    let b = format!("018e13f1{}", "b".repeat(56));
+    let roots = [root(&a), root(&b)];
+    assert_eq!(
+        trust_client::fingerprint_in("01:8E:13:F0", &roots).unwrap(),
+        a
+    );
+    assert_eq!(
+        trust_client::fingerprint_in("deadbeef", &roots)
+            .unwrap_err()
+            .kind,
+        trust_client::ErrorKind::NotFound
+    );
+    assert_eq!(
+        trust_client::fingerprint_in("018e13f", &roots)
+            .unwrap_err()
+            .kind,
+        trust_client::ErrorKind::Other
+    );
+    let whole = "c".repeat(64);
+    assert_eq!(trust_client::fingerprint_in(&whole, &roots).unwrap(), whole);
+    assert_eq!(
+        trust_client::normalise_fingerprint("01:8E 13-F0").unwrap(),
+        "018e13f0"
+    );
+}
+#[test]
+fn the_default_control_descriptor_is_the_cores() {
+    assert_eq!(
+        trust_client::default_control_security().unwrap(),
+        trust_core::default_control_security().as_bytes()
+    );
+}

@@ -161,6 +161,9 @@ def generate_helpers(schema: Schema) -> tuple[list[str], list[str]]:
         "pub(crate) fn strings(&mut self, values: &[String]) -> abi::Strings {",
         "let owned: Box<[_]> = values.iter().map(|value| self.text(value)).collect();",
         "let result = abi::Strings { data: owned.as_ptr(), len: owned.len() }; self.allocations.push(Box::new(owned)); result }",
+        "pub(crate) fn byte_list(&mut self, values: &[Vec<u8>]) -> abi::Strings {",
+        "let owned: Box<[_]> = values.iter().map(|value| self.bytes(value)).collect();",
+        "let result = abi::Strings { data: owned.as_ptr(), len: owned.len() }; self.allocations.push(Box::new(owned)); result }",
     ]
     decode = [
         "//! Generated owned copies of views borrowed from a live library result.",
@@ -183,6 +186,9 @@ def generate_helpers(schema: Schema) -> tuple[list[str], list[str]]:
         "pub(crate) unsafe fn strings(value: abi::Strings) -> Result<Vec<String>, Error> {",
         "// SAFETY: all nested spans are owned by the same live result.",
         "unsafe { array(value.data, value.len) }.iter().map(|value| unsafe { text(*value) }).collect() }",
+        "pub(crate) unsafe fn byte_list(value: abi::Strings) -> Vec<Vec<u8>> {",
+        "// SAFETY: all nested spans are owned by the same live result.",
+        "unsafe { array(value.data, value.len) }.iter().map(|value| unsafe { bytes(*value) }).collect() }",
     ]
 
     return view, decode

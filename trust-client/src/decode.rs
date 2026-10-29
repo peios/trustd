@@ -30,6 +30,13 @@ pub(crate) unsafe fn strings(value: abi::Strings) -> Result<Vec<String>, Error> 
         .map(|value| unsafe { text(*value) })
         .collect()
 }
+pub(crate) unsafe fn byte_list(value: abi::Strings) -> Vec<Vec<u8>> {
+    // SAFETY: all nested spans are owned by the same live result.
+    unsafe { array(value.data, value.len) }
+        .iter()
+        .map(|value| unsafe { bytes(*value) })
+        .collect()
+}
 pub(crate) unsafe fn root(value: &abi::Root) -> Result<trust_core::Root, Error> {
     // SAFETY: the caller keeps the result and every nested allocation alive.
     #[allow(unused_unsafe)]

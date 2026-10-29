@@ -5,6 +5,7 @@ use trust_abi as abi;
 unsafe extern "C" {
     pub fn peios_trust_result_free(result: *mut c_void);
     pub fn peios_trust_result_error(result: *const c_void) -> i32;
+    pub fn peios_trust_result_failure(result: *const c_void) -> u32;
     pub fn peios_trust_result_message(result: *const c_void) -> abi::Bytes;
     pub fn peios_trust_result_text(result: *const c_void) -> *const abi::Bytes;
     pub fn peios_trust_result_bytes(result: *const c_void) -> *const abi::Bytes;
@@ -14,6 +15,7 @@ unsafe extern "C" {
     pub fn peios_trust_result_details(result: *const c_void) -> *const abi::Details;
     pub fn peios_trust_result_root_list(result: *const c_void) -> *const abi::RootList;
     pub fn peios_trust_result_distrusted_list(result: *const c_void) -> *const abi::DistrustedList;
+    pub fn peios_trust_result_byte_list(result: *const c_void) -> *const abi::Strings;
     pub fn peios_trust_get_status(path: abi::Bytes, timeout_ms: u64) -> *mut c_void;
     pub fn peios_trust_roots(
         path: abi::Bytes,
@@ -50,4 +52,10 @@ unsafe extern "C" {
     pub fn peios_trust_subscription_free(subscription: *mut c_void);
     pub fn peios_trust_result_generation(result: *const c_void) -> u64;
     pub fn peios_trust_resolve(argument: abi::Bytes) -> *mut c_void;
+    pub fn peios_trust_fingerprint(der: abi::Bytes) -> *mut c_void;
+    pub fn peios_trust_to_pem(der: abi::Bytes) -> *mut c_void;
+    pub fn peios_trust_from_pem(text: abi::Bytes) -> *mut c_void;
+    pub fn peios_trust_normalise_fingerprint(text: abi::Bytes) -> *mut c_void;
+    pub fn peios_trust_fingerprint_in(text: abi::Bytes, fingerprints: abi::Strings) -> *mut c_void;
+    pub fn peios_trust_default_control_security() -> *mut c_void;
 }

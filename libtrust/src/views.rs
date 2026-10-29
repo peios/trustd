@@ -36,6 +36,15 @@ impl Arena {
         self.allocations.push(Box::new(owned));
         result
     }
+    pub(crate) fn byte_list(&mut self, values: &[Vec<u8>]) -> abi::Strings {
+        let owned: Box<[_]> = values.iter().map(|value| self.bytes(value)).collect();
+        let result = abi::Strings {
+            data: owned.as_ptr(),
+            len: owned.len(),
+        };
+        self.allocations.push(Box::new(owned));
+        result
+    }
     pub(crate) fn root(&mut self, value: &trust_core::Root) -> abi::Root {
         abi::Root {
             fingerprint: self.text(&value.fingerprint),

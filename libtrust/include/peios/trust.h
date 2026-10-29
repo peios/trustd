@@ -5,7 +5,8 @@
  * Handles are library-specific. Mutation/free require exclusive access.
  * Operations are never automatically replayed after uncertain I/O errors.
  * timeout_ms is positive and covers connect, send and receive together.
- * Result errors are POSIX codes; diagnostic wording is not stable. */
+ * Result errors are POSIX codes, and result_failure gives their kind,
+ * PEIOS_TRUST_FAILURE_*; both are stable. Diagnostic wording is not. */
 #ifndef PEIOS_TRUST_H
 #define PEIOS_TRUST_H
 #include "trust-types.h"
@@ -16,6 +17,8 @@ typedef struct peios_trust_result peios_trust_result;
 uint32_t peios_trust_abi_version(void);
 void peios_trust_result_free(peios_trust_result *result);
 int32_t peios_trust_result_error(const peios_trust_result *result);
+/* The kind of failure: NONE on success, OTHER for a null result. */
+uint32_t peios_trust_result_failure(const peios_trust_result *result);
 peios_trust_bytes peios_trust_result_message(const peios_trust_result *result);
 const peios_trust_bytes *peios_trust_result_text(const peios_trust_result *result);
 const peios_trust_bytes *peios_trust_result_bytes(const peios_trust_result *result);
@@ -26,6 +29,8 @@ const peios_trust_details *peios_trust_result_details(const peios_trust_result *
 const peios_trust_root_list *peios_trust_result_root_list(const peios_trust_result *result);
 const peios_trust_distrusted_list *
 peios_trust_result_distrusted_list(const peios_trust_result *result);
+/* A list of byte strings: each span is one certificate's DER. */
+const peios_trust_strings *peios_trust_result_byte_list(const peios_trust_result *result);
 /* Read the daemon status. */
 peios_trust_result *peios_trust_get_status(peios_trust_bytes path, uint64_t timeout_ms);
 /* Read a complete, generation-consistent trust snapshot. */
@@ -70,6 +75,22 @@ peios_trust_result *peios_trust_subscription_next(peios_trust_subscription *subs
 void peios_trust_subscription_free(peios_trust_subscription *subscription);
 uint64_t peios_trust_result_generation(const peios_trust_result *result);
 peios_trust_result *peios_trust_resolve(peios_trust_bytes argument);
+/* Return a certificate's SHA-256 fingerprint, lowercase hex, as text. */
+peios_trust_result *peios_trust_fingerprint(peios_trust_bytes der);
+/* Return a certificate's DER as one PEM block of 64 columns, as text. */
+peios_trust_result *peios_trust_to_pem(peios_trust_bytes der);
+/* Return the DER of every CERTIFICATE block of a PEM document, as a byte list. */
+peios_trust_result *peios_trust_from_pem(peios_trust_bytes text);
+/* Return a fingerprint as compared: lowercase, separators removed, as text. */
+peios_trust_result *peios_trust_normalise_fingerprint(peios_trust_bytes text);
+/* Resolve a whole fingerprint, or an unambiguous prefix of at least eight
+ * digits of one of fingerprints, without contacting trustd. No match fails
+ * with PEIOS_TRUST_FAILURE_NOT_FOUND. */
+peios_trust_result *peios_trust_fingerprint_in(peios_trust_bytes text,
+                                               peios_trust_strings fingerprints);
+/* Return the self-relative descriptor trustd checks against when the
+ * ControlSecurity value is absent, as bytes. */
+peios_trust_result *peios_trust_default_control_security(void);
 #ifdef __cplusplus
 }
 #endif

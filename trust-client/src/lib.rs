@@ -10,20 +10,61 @@ use std::time::Duration;
 
 use trust_abi as abi;
 
+pub use trust_core::cert::{Details, Parsed};
 pub use trust_core::{
-    CERTIFICATES_KEY, Health, Root, SOCKET_PATH, Source, Status, TRUST_ALL_ACCESS, TRUST_CONTROL,
-    TRUST_KEY, TRUST_QUERY,
+    ADD_KEY, CERTIFICATE_VALUE, CERTIFICATES_KEY, COMPAT_VALUE, CONTROL_SECURITY_VALUE,
+    DISTRUST_KEY, Health, PURPOSES_VALUE, Root, SHARE_BUNDLE, SOCKET_PATH, Source, Status,
+    TRUST_ALL_ACCESS, TRUST_CONTROL, TRUST_KEY, TRUST_QUERY,
 };
 
 mod decode;
 mod ffi;
 
-/// A POSIX error code and diagnostic returned by libtrust. Diagnostics are for
-/// people; their wording is not a stable interface.
+/// A POSIX error code, the kind of failure, and a diagnostic returned by
+/// libtrust. The code and the kind are stable; diagnostics are for people,
+/// and their wording is not a stable interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub code: i32,
+    pub kind: ErrorKind,
     pub message: String,
+}
+
+/// What kind of failure an error is, as libtrust's `PEIOS_TRUST_FAILURE_*`
+/// say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// Anything else: trustd unreachable, an ambiguous fingerprint, input
+    /// the library refuses.
+    Other,
+    /// The caller may not make the change: the key's descriptor said no.
+    Denied,
+    /// What was asked about isn't there, a fingerprint no root has say.
+    NotFound,
+    /// The bytes are not a certificate.
+    Malformed,
+    /// A certificate, but not a certificate authority's.
+    NotACa,
+    /// A certificate past its expiry.
+    Expired,
+    /// PEM with no CERTIFICATE block.
+    NoCertificate,
+}
+
+impl ErrorKind {
+    /// The kind libtrust's number `failure` names; one it does not know is
+    /// other.
+    fn from_failure(failure: u32) -> Self {
+        match failure {
+            2 => Self::Denied,
+            3 => Self::NotFound,
+            4 => Self::Malformed,
+            5 => Self::NotACa,
+            6 => Self::Expired,
+            7 => Self::NoCertificate,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -36,6 +77,7 @@ impl std::error::Error for Error {}
 pub(crate) fn invalid(message: &str) -> Error {
     Error {
         code: libc::EINVAL,
+        kind: ErrorKind::Other,
         message: message.into(),
     }
 }
@@ -67,8 +109,11 @@ impl OwnedResult {
             // SAFETY: the diagnostic remains borrowed from result until copied.
             let message =
                 unsafe { decode::text(ffi::peios_trust_result_message(result.0.as_ptr())) };
+            // SAFETY: result is live, as above.
+            let failure = unsafe { ffi::peios_trust_result_failure(result.0.as_ptr()) };
             return Err(Error {
                 code,
+                kind: ErrorKind::from_failure(failure),
                 message: message?,
             });
         }
@@ -388,5 +433,77 @@ pub fn resolve(argument: &str) -> Result<String, Error> {
             .as_ref()
             .ok_or_else(|| invalid("missing fingerprint"))?;
         decode::text(*text)
+    }
+}
+
+/// The text a result carries, copied.
+unsafe fn result_text(result: &OwnedResult) -> Result<String, Error> {
+    // SAFETY: result remains alive through the accessor and the copy.
+    unsafe {
+        let text = ffi::peios_trust_result_text(result.0.as_ptr())
+            .as_ref()
+            .ok_or_else(|| invalid("missing library result"))?;
+        decode::text(*text)
+    }
+}
+/// A certificate's SHA-256 fingerprint, lowercase hex, without parsing it.
+pub fn fingerprint(der: &[u8]) -> Result<String, Error> {
+    // SAFETY: input storage lives through the call; result owns all decoded views.
+    unsafe { result_text(&OwnedResult::take(ffi::peios_trust_fingerprint(span(der)))?) }
+}
+/// A certificate's DER as one PEM block of 64 columns.
+pub fn to_pem(der: &[u8]) -> Result<String, Error> {
+    // SAFETY: input storage lives through the call; result owns all decoded views.
+    unsafe { result_text(&OwnedResult::take(ffi::peios_trust_to_pem(span(der)))?) }
+}
+/// The DER of every certificate of a PEM document, in order.
+pub fn from_pem(text: &str) -> Result<Vec<Vec<u8>>, Error> {
+    // SAFETY: input storage lives through the call; result owns all decoded views.
+    unsafe {
+        let result = OwnedResult::take(ffi::peios_trust_from_pem(span(text.as_bytes())))?;
+        let view = ffi::peios_trust_result_byte_list(result.0.as_ptr())
+            .as_ref()
+            .ok_or_else(|| invalid("missing library result"))?;
+        Ok(decode::byte_list(*view))
+    }
+}
+/// A fingerprint as compared: lowercase hex, separators removed.
+pub fn normalise_fingerprint(text: &str) -> Result<String, Error> {
+    // SAFETY: input storage lives through the call; result owns all decoded views.
+    unsafe {
+        result_text(&OwnedResult::take(ffi::peios_trust_normalise_fingerprint(
+            span(text.as_bytes()),
+        ))?)
+    }
+}
+/// The whole fingerprint `text` stands for: a whole fingerprint, or an
+/// unambiguous prefix of at least eight digits of one of `roots`'. No match
+/// is an error of kind [`ErrorKind::NotFound`]; trustd is not asked.
+pub fn fingerprint_in(text: &str, roots: &[Root]) -> Result<String, Error> {
+    let fingerprints: Vec<_> = roots
+        .iter()
+        .map(|root| span(root.fingerprint.as_bytes()))
+        .collect();
+    // SAFETY: input storage lives through the call; result owns all decoded views.
+    unsafe {
+        result_text(&OwnedResult::take(ffi::peios_trust_fingerprint_in(
+            span(text.as_bytes()),
+            abi::Strings {
+                data: fingerprints.as_ptr(),
+                len: fingerprints.len(),
+            },
+        ))?)
+    }
+}
+/// The control object's descriptor, self-relative, that trustd checks
+/// against when the `ControlSecurity` value is absent.
+pub fn default_control_security() -> Result<Vec<u8>, Error> {
+    // SAFETY: the call takes no input; result owns all decoded views.
+    unsafe {
+        let result = OwnedResult::take(ffi::peios_trust_default_control_security())?;
+        let view = ffi::peios_trust_result_bytes(result.0.as_ptr())
+            .as_ref()
+            .ok_or_else(|| invalid("missing library result"))?;
+        Ok(decode::bytes(*view))
     }
 }
