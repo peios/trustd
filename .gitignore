@@ -1,13 +1,15 @@
 /target
-/out
 /tests/vm/probe-tls/target
 /fuzz/target
 /fuzz/artifacts
 /fuzz/corpus
 
-/bazel-*
-/.bazel-vendor
-/.build
 .trail-cache/
 __pycache__/
 *.pyc
+
+# pekit build output.
+/pekit-out/
+
+# Libraries pekit fetches for the pins in `pekit.lock`.
+/.gcsl/
