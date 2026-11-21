@@ -259,13 +259,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libtrust"
-version = "0.1.0"
-dependencies = [
- "peios",
-]
-
-[[package]]
 name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -295,7 +288,8 @@ dependencies = [
 
 [[package]]
 name = "peios"
-version = "0.4.0"
+version = "0.5.0"
+source = "git+https://github.com/peios/peios-rs.git?rev=623520bc0405fdd4526bab45f45882e7f19b1ab1#623520bc0405fdd4526bab45f45882e7f19b1ab1"
 dependencies = [
  "bitflags",
  "libc",
@@ -304,7 +298,8 @@ dependencies = [
 
 [[package]]
 name = "peios-sys"
-version = "0.3.0"
+version = "0.4.0"
+source = "git+https://github.com/peios/peios-rs.git?rev=623520bc0405fdd4526bab45f45882e7f19b1ab1#623520bc0405fdd4526bab45f45882e7f19b1ab1"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -462,15 +457,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "trustd"
-version = "0.1.0"
+name = "trust-core"
+version = "0.1.6"
 dependencies = [
  "der",
- "libc",
- "libtrust",
  "peios",
  "sha1",
  "sha2",
+ "x509-cert",
+]
+
+[[package]]
+name = "trustd"
+version = "0.1.6"
+dependencies = [
+ "der",
+ "libc",
+ "peios",
+ "sha1",
+ "sha2",
+ "trust-core",
  "x509-cert",
 ]
 
@@ -479,7 +485,7 @@ name = "trustd-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "libtrust",
+ "trust-core",
  "trustd",
 ]
 
